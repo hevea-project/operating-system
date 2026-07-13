@@ -1,0 +1,9 @@
+config BR2_PACKAGE_HEVEA_BOOTSTRAP
+	bool "Hevea Bootstrap"
+	help
+	  Install the Hevea bootstrap service that automatically
+	  sets up the Hevea Apps repository and installs required
+	  add-ons (Hevea Access Point, Hevea Onboarding App, Hevea OpenVPN).
+
+	  This service runs once during first boot and creates a marker
+	  file to prevent re-execution on subsequent boots.

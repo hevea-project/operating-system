@@ -1,0 +1,20 @@
+[Unit]
+Description=Hevea bootstrap script
+DefaultDependencies=no
+After=network-online.target
+Wants=network-online.target
+Before=multi-user.target
+
+# Run only once: install the Hevea store repo, then install addons.
+# ConditionPathExists=! checks that the marker file does NOT exist.
+# Once the service completes, the marker file is created by the script.
+ConditionPathExists=!/etc/hevea-bootstrap.complete
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/hevea-bootstrap.sh
+RemainAfterExit=yes
+SuccessExitStatus=2
+
+[Install]
+WantedBy=multi-user.target
