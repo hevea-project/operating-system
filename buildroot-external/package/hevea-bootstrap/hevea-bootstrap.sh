@@ -58,18 +58,30 @@ HEVEA_REPO_SLUG=$(get_hevea_repo_slug)
 # Add the Hevea store repository if not already present
 echo "Adding Hevea store repository..."
 if ha store --raw-json | jq -e ".data.repositories[] | select(.name == \"$HEVEA_REPO_NAME\")" >/dev/null 2>&1; then
-  echo "Repository '$HEVEA_REPO_NAME' already exists, skipping."
+  echo "✅ Repository '$HEVEA_REPO_NAME' already exists, skipping."
 else
-  ha store add "$HEVEA_REPO_URL" "$HEVEA_REPO_NAME"
+  if ha store add "$HEVEA_REPO_URL" "$HEVEA_REPO_NAME"; then
+    echo "✅ Added repository '$HEVEA_REPO_NAME'."
+  else
+    echo "❌ Failed to add repository '$HEVEA_REPO_NAME'." >&2
+    exit 1
+  fi
 fi
 
 # Install the three required addons
 echo "Installing Hevea addons..."
 
 for addon in "Hevea Access Point" "Hevea Onboarding App" "Hevea OpenVPN"; do
-  slug=$(addon_slug_from_name "$addon" "$HEVEA_REPO_SLUG")
-  echo "Installing add-on: $slug"
-  ha store install "$slug" --raw-json >/dev/null 2>&1
+  if slug=$(addon_slug_from_name "$addon" "$HEVEA_REPO_SLUG" 2>/dev/null); then
+    echo "🚀 Installing add-on: $addon ($slug)"
+    if ha store install "$slug" --raw-json >/dev/null 2>&1; then
+      echo "✅ Successfully installed: $addon"
+    else
+      echo "❌ Failed to install: $addon ($slug)" >&2
+    fi
+  else
+    echo "⚠️ Failed to find application '$addon' in registry" >&2
+  fi
 done
 
 # Create marker file so systemd won't re-run this on next boot
