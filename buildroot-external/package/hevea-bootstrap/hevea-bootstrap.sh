@@ -54,8 +54,6 @@ echo "⏳ Waiting for Home Assistant Supervisor to start..."
 ha banner >/dev/null 2>&1
 
 # Get the slug for Hevea Apps repository
-HEVEA_REPO_SLUG=$(get_hevea_repo_slug)
-
 # Add the Hevea store repository if not already present
 if ha store --raw-json | jq -e ".data.repositories[] | select(.name == \"$HEVEA_REPO_NAME\")" >/dev/null 2>&1; then
   echo "✅ Repository '$HEVEA_REPO_NAME' already exists."
@@ -68,6 +66,8 @@ else
     exit 1
   fi
 fi
+
+HEVEA_REPO_SLUG=$(get_hevea_repo_slug)
 
 # Install the three required addons
 echo "Installing Hevea addons..."
