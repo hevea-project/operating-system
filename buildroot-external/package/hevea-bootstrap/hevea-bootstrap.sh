@@ -57,10 +57,10 @@ ha banner >/dev/null 2>&1
 HEVEA_REPO_SLUG=$(get_hevea_repo_slug)
 
 # Add the Hevea store repository if not already present
-echo "Adding Hevea store repository..."
 if ha store --raw-json | jq -e ".data.repositories[] | select(.name == \"$HEVEA_REPO_NAME\")" >/dev/null 2>&1; then
-  echo "✅ Repository '$HEVEA_REPO_NAME' already exists, skipping."
+  echo "✅ Repository '$HEVEA_REPO_NAME' already exists."
 else
+  echo "Adding Hevea store repository..."
   if ha store add "$HEVEA_REPO_URL" "$HEVEA_REPO_NAME"; then
     echo "✅ Added repository '$HEVEA_REPO_NAME'."
   else
@@ -71,17 +71,16 @@ fi
 
 # Install the three required addons
 echo "Installing Hevea addons..."
-
 for addon in "Hevea Access Point" "Hevea Onboarding App" "Hevea OpenVPN client"; do
   if slug=$(addon_slug_from_name "$addon" "$HEVEA_REPO_SLUG" 2>/dev/null); then
-    echo "🚀 Installing add-on: $addon ($slug)"
+    echo "🚀 Installing: $addon"
     if ha store install "$slug" --raw-json >/dev/null 2>&1; then
-      echo "✅ Successfully installed: $addon"
+      echo "   ✅ Done"
     else
-      echo "❌ Failed to install: $addon ($slug)" >&2
+      echo "   ❌ Failed" >&2
     fi
   else
-    echo "⚠️ Failed to find application '$addon' in registry" >&2
+    echo "⚠️ Could not find '$addon' in registry" >&2
   fi
 done
 
