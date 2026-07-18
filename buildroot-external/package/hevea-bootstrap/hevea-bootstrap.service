@@ -1,9 +1,8 @@
 [Unit]
 Description=Hevea bootstrap script
 DefaultDependencies=no
-After=network-online.target
-Wants=network-online.target
-Before=multi-user.target
+After=haos-supervisor.service
+Wants=haos-supervisor.service
 
 # Run only once: install the Hevea store repo, then install addons.
 # ConditionPathExists=! checks that the marker file does NOT exist.
