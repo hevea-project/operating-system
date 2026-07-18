@@ -72,7 +72,7 @@ fi
 # Install the three required addons
 echo "Installing Hevea addons..."
 
-for addon in "Hevea Access Point" "Hevea Onboarding App" "Hevea OpenVPN"; do
+for addon in "Hevea Access Point" "Hevea Onboarding App" "Hevea OpenVPN client"; do
   if slug=$(addon_slug_from_name "$addon" "$HEVEA_REPO_SLUG" 2>/dev/null); then
     echo "🚀 Installing add-on: $addon ($slug)"
     if ha store install "$slug" --raw-json >/dev/null 2>&1; then
