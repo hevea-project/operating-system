@@ -5,7 +5,6 @@ HEVEA_REPO_NAME="Hevea Apps"
 HEVEA_REPO_URL="https://github.com/hevea-project/hassio-apps"
 BOOTSTRAP_MARKER="/etc/hevea-bootstrap.complete"
 
-# ── Reusable function ───────────────────────────────────────────────
 get_hevea_repo_slug() {
   local json
   json=$(ha store --raw-json)
@@ -49,8 +48,10 @@ addon_slug_from_name() {
   echo "$slug"
 }
 
-# ── Main ────────────────────────────────────────────────────────────
 echo "=== Hevea Bootstrap ==="
+
+echo "⏳ Waiting for Home Assistant Supervisor to start..."
+ha banner >/dev/null 2>&1
 
 # Get the slug for Hevea Apps repository
 HEVEA_REPO_SLUG=$(get_hevea_repo_slug)
