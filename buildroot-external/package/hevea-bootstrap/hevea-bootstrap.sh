@@ -51,6 +51,19 @@ addon_slug_from_name() {
 echo "=== Hevea Bootstrap ==="
 
 echo "⏳ Waiting for Home Assistant Supervisor to start..."
+# Wait for the 'ha' command to be available (hassio_cli container is up)
+for i in 1 2 3 4 5 6; do
+  if ha >/dev/null 2>&1; then
+    break
+  fi
+  if [ "$i" -eq 6 ]; then
+    echo "❌ Failed to execute 'ha' after 6 attempts. It might be because the hassio_cli container is not running." >&2
+    exit 1
+  fi
+  sleep 10
+done
+
+# Now wait for the Supervisor itself to be ready
 ha banner >/dev/null 2>&1
 
 # Get the slug for Hevea Apps repository
