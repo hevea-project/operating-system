@@ -72,12 +72,17 @@ if ha store --raw-json | jq -e ".data.repositories[] | select(.name == \"$HEVEA_
   echo "✅ Repository '$HEVEA_REPO_NAME' already exists."
 else
   echo "Adding Hevea store repository..."
-  if ha store add "$HEVEA_REPO_URL"; then
-    echo "✅ Added repository '$HEVEA_REPO_NAME'."
-  else
-    echo "❌ Failed to add repository '$HEVEA_REPO_NAME'." >&2
-    exit 1
-  fi
+  for i in 1 2 3 4 5 6; do
+    if ha store add "$HEVEA_REPO_URL"; then
+      echo "✅ Added repository '$HEVEA_REPO_NAME'."
+      break
+    fi
+    if [ "$i" -eq 6 ]; then
+      echo "❌ Failed to add repository '$HEVEA_REPO_NAME' after 6 attempts." >&2
+      exit 1
+    fi
+    sleep 10
+  done
 fi
 
 HEVEA_REPO_SLUG=$(get_hevea_repo_slug)
