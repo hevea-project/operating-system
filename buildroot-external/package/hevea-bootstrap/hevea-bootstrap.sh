@@ -5,6 +5,21 @@ HEVEA_REPO_NAME="Hevea Apps"
 HEVEA_REPO_URL="https://github.com/hevea-project/hassio-apps"
 BOOTSTRAP_MARKER="/etc/hevea-bootstrap.complete"
 
+retry_command() {
+  local cmd="$1"
+  local error_msg="$2"
+  for i in 1 2 3 4 5 6; do
+    if eval "$cmd" >/dev/null 2>&1; then
+      return 0
+    fi
+    if [ "$i" -eq 6 ]; then
+      echo "❌ $error_msg" >&2
+      return 1
+    fi
+    sleep 10
+  done
+}
+
 get_hevea_repo_slug() {
   local json
   json=$(ha store --raw-json)
@@ -52,16 +67,7 @@ echo "=== Hevea Bootstrap ==="
 
 echo "⏳ Waiting for Home Assistant Supervisor to start..."
 # Wait for the 'ha' command to be available (hassio_cli container is up)
-for i in 1 2 3 4 5 6; do
-  if ha >/dev/null 2>&1; then
-    break
-  fi
-  if [ "$i" -eq 6 ]; then
-    echo "❌ Failed to execute 'ha' after 6 attempts. It might be because the hassio_cli container is not running." >&2
-    exit 1
-  fi
-  sleep 10
-done
+retry_command "ha" "Failed to execute 'ha' after 6 attempts. It might be because the hassio_cli container is not running."
 
 # Now wait for the Supervisor itself to be ready
 ha banner >/dev/null 2>&1
@@ -72,17 +78,11 @@ if ha store --raw-json | jq -e ".data.repositories[] | select(.name == \"$HEVEA_
   echo "✅ Repository '$HEVEA_REPO_NAME' already exists."
 else
   echo "Adding Hevea store repository..."
-  for i in 1 2 3 4 5 6; do
-    if ha store add "$HEVEA_REPO_URL"; then
-      echo "✅ Added repository '$HEVEA_REPO_NAME'."
-      break
-    fi
-    if [ "$i" -eq 6 ]; then
-      echo "❌ Failed to add repository '$HEVEA_REPO_NAME' after 6 attempts." >&2
-      exit 1
-    fi
-    sleep 10
-  done
+  if retry_command "ha store add \"$HEVEA_REPO_URL\"" "Failed to add repository '$HEVEA_REPO_NAME' after 6 attempts."; then
+    echo "✅ Added repository '$HEVEA_REPO_NAME'."
+  else
+    exit 1
+  fi
 fi
 
 HEVEA_REPO_SLUG=$(get_hevea_repo_slug)
