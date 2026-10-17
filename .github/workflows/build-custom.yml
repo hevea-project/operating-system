@@ -1,0 +1,180 @@
+# Build Home Assistant OS images for rpi4-64 and ova (QEMU/x86-64)
+#
+# Triggers:
+#   - Manual: Actions → Build HAOS images → Run workflow
+#   - Automatic: push to main or hevea branches
+#
+# Outputs:
+#   - GitHub Actions artifacts (downloadable from the Actions tab, 90-day retention)
+#   - Optionally: GitHub Release assets (uncomment the release step)
+
+name: Build HAOS images
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, hevea]
+
+jobs:
+  prepare:
+    name: Build builder image
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Read version from meta
+        id: version
+        run: |
+          . buildroot-external/meta
+          if [ -n "${VERSION_SUFFIX}" ]; then
+            full="${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_SUFFIX}"
+          else
+            full="${VERSION_MAJOR}.${VERSION_MINOR}"
+          fi
+          # Append dev timestamp for non-release builds
+          full="${full}-dev$(date +%s)"
+          echo "version=${full}" >> "$GITHUB_OUTPUT"
+          echo "HAOS version: ${full}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push builder image
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        id: build
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/haos-builder:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  build:
+    name: Build ${{ matrix.board.id }}
+    needs: prepare
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        board:
+          - id: rpi4-64
+            defconfig: rpi4_64
+            output_dir: output_rpi4_64
+          - id: ova
+            defconfig: ova
+            output_dir: output_ova
+    steps:
+      - name: Checkout source (with submodules)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          submodules: true
+          persist-credentials: false
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android/sdk/ndk
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo mkdir -p /mnt/cache /mnt/output
+          sudo ln -sf /mnt/output "${GITHUB_WORKSPACE}/${{ matrix.board.output_dir }}"
+          sudo chown -R "$(id -u):$(id -g)" /mnt/cache /mnt/output
+          df -h
+
+      - name: Restore ccache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /mnt/cache/cc
+          key: haos-cc-${{ matrix.board.id }}-${{ github.ref }}
+          restore-keys: haos-cc-${{ matrix.board.id }}-
+
+      - name: Restore download cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /mnt/cache/dl
+          key: haos-dl-${{ matrix.board.id }}-${{ github.ref }}
+          restore-keys: haos-dl-${{ matrix.board.id }}-
+
+      - name: Log in to GHCR
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate defconfig
+        run: |
+          docker run --rm --privileged \
+            -e BUILDER_UID="$(id -u)" -e BUILDER_GID="$(id -g)" \
+            -v "${GITHUB_WORKSPACE}:/build" \
+            -v /mnt/cache:/cache \
+            -v /mnt/output:/build/${{ matrix.board.output_dir }} \
+            ghcr.io/${{ github.repository_owner }}/haos-builder:latest \
+            make O=${{ matrix.board.output_dir }} ${{ matrix.board.defconfig }}_defconfig
+
+      - name: Build
+        run: |
+          docker run --rm --privileged \
+            -e BUILDER_UID="$(id -u)" -e BUILDER_GID="$(id -g)" \
+            -v "${GITHUB_WORKSPACE}:/build" \
+            -v /mnt/cache:/cache \
+            -v /mnt/output:/build/${{ matrix.board.output_dir }} \
+            ghcr.io/${{ github.repository_owner }}/haos-builder:latest \
+            make O=${{ matrix.board.output_dir }}
+
+      - name: List output images
+        run: |
+          echo "## Built images" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          ls -lh ${{ matrix.board.output_dir }}/images/
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          for f in ${{ matrix.board.output_dir }}/images/haos_*; do
+            echo "| $(basename "$f") | $(du -h "$f" | cut -f1) |" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: haos_${{ matrix.board.id }}-${{ needs.prepare.outputs.version }}
+          path: ${{ matrix.board.output_dir }}/images/haos_*
+          if-no-files-found: error
+          retention-days: 90
+
+      # Uncomment to also publish to a GitHub Release (permanent hosting):
+      # - name: Upload to GitHub Release
+      #   uses: softprops/action-gh-release@v2
+      #   with:
+      #     files: |
+      #       ${{ matrix.board.output_dir }}/images/haos_*
+      #     tag_name: haos-${{ matrix.board.id }}-${{ needs.prepare.outputs.version }}
+      #     name: HAOS ${{ matrix.board.id }} ${{ needs.prepare.outputs.version }}
+      #     generate_release_notes: true
+
+      - name: Save ccache
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /mnt/cache/cc
+          key: haos-cc-${{ matrix.board.id }}-${{ github.ref }}
+
+      - name: Save download cache
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /mnt/cache/dl
+          key: haos-dl-${{ matrix.board.id }}-${{ github.ref }}
