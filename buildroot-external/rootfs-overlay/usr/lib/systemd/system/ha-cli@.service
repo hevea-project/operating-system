@@ -2,6 +2,7 @@
 Description=Home Assistant CLI
 Wants=haos-supervisor.service
 After=systemd-user-sessions.service plymouth-quit-wait.service getty-pre.target haos-supervisor.service
+Before=hevea-bootstrap.service
 Conflicts=getty@%i.service
 
 # If additional gettys are spawned during boot then we should make
