@@ -92,7 +92,7 @@ echo "Installing Hevea addons..."
 for addon in "Hevea Access Point" "Hevea Onboarding App" "Hevea OpenVPN client"; do
   if slug=$(addon_slug_from_name "$addon" "$HEVEA_REPO_SLUG" 2>/dev/null); then
     echo "🚀 Installing: $addon"
-    if ha store install "$slug" --raw-json >/dev/null 2>&1; then
+    if ha store apps install "$slug" --raw-json >/dev/null 2>&1; then
       echo "   ✅ Done"
     else
       echo "   ❌ Failed" >&2
