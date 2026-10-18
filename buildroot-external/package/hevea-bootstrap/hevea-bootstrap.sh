@@ -3,7 +3,7 @@ set -euo pipefail
 
 HEVEA_REPO_NAME="Hevea Apps"
 HEVEA_REPO_URL="https://github.com/hevea-project/hassio-apps"
-BOOTSTRAP_MARKER="/etc/hevea-bootstrap.complete"
+BOOTSTRAP_MARKER="/mnt/overlay/etc/hevea-bootstrap.complete"
 
 retry_command() {
   local cmd="$1"
