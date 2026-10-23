@@ -1,8 +1,7 @@
 # Build Home Assistant OS images for rpi4-64 and ova (QEMU/x86-64)
 #
 # Triggers:
-#   - Manual: Actions → Build HAOS images → Run workflow
-#   - Automatic: push to main or hevea branches
+#   - Manual only: Actions → Build HAOS images → Run workflow
 #
 # Outputs:
 #   - GitHub Actions artifacts (downloadable from the Actions tab, 90-day retention)
@@ -12,8 +11,6 @@ name: Build HAOS images
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main, hevea]
 
 jobs:
   prepare:

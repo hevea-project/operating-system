@@ -1,8 +1,7 @@
 name: 'Label Actions'
 
 on:
-  issues:
-    types: [labeled, unlabeled]
+  workflow_dispatch:
 
 permissions:
   contents: read
