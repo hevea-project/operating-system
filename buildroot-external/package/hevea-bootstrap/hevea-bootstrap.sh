@@ -102,6 +102,18 @@ for addon in "Hevea Access Point" "Hevea Gateway" "Hevea OpenVPN client"; do
   fi
 done
 
+# Start the Hevea Gateway addon
+echo "🚀 Starting Hevea Gateway addon..."
+if slug=$(addon_slug_from_name "Hevea Gateway" "$HEVEA_REPO_SLUG" 2>/dev/null); then
+  if ha apps start "$slug" >/dev/null 2>&1; then
+    echo "   ✅ Done"
+  else
+    echo "   ❌ Failed" >&2
+  fi
+else
+  echo "   ⚠️ Could not find Hevea Gateway slug" >&2
+fi
+
 # Create marker file so systemd won't re-run this on next boot
 touch "$BOOTSTRAP_MARKER"
 echo "=== Hevea Bootstrap complete ==="
