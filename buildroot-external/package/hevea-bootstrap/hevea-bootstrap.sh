@@ -89,7 +89,7 @@ HEVEA_REPO_SLUG=$(get_hevea_repo_slug)
 
 # Install the three required addons
 echo "Installing Hevea addons..."
-for addon in "Hevea Access Point" "Hevea Gateway" "Hevea OpenVPN client"; do
+for addon in "Hass.io Access Point" "Hevea Gateway" "Hevea OpenVPN client"; do
   if slug=$(addon_slug_from_name "$addon" "$HEVEA_REPO_SLUG" 2>/dev/null); then
     echo "🚀 Installing: $addon"
     if ha store apps install "$slug" --raw-json >/dev/null 2>&1; then
