@@ -9,7 +9,17 @@ docker_version=$4
 data_img="${dst_dir}/data.ext4"
 data_dir="${build_dir}/data"
 
-APPARMOR_URL="https://version.home-assistant.io/apparmor_${channel}.txt"
+APPARMOR_URL="https://chezbob.glumol.com/hevea/apparmor_${channel}.txt"
+
+# Hevea add-ons preload: image tarballs location (downloaded by hevea-gateway package)
+HEVEA_IMGDIR="${dst_dir}/hevea-gateway"
+
+# Copy all Hevea add-on images to build_dir/images so dind-import-containers.sh picks them up
+if [ -d "${HEVEA_IMGDIR}" ]; then
+    echo "Embedding Hevea add-on images from: ${HEVEA_IMGDIR}"
+    mkdir -p "${build_dir}/images"
+    cp "${HEVEA_IMGDIR}"/*.tar "${build_dir}/images/"
+fi
 
 # Make image
 rm -f "${data_img}"
@@ -41,6 +51,12 @@ curl -fsL -o "${data_dir}/supervisor/apparmor/hassio-supervisor" "${APPARMOR_URL
 
 # Persist build-time updater channel
 jq -n --arg channel "${channel}" '{"channel": \$channel}' > "${data_dir}/supervisor/updater.json"
+
+# Note: The Hevea Gateway add-on is NOT pre-configured here. The
+# hevea-gateway service installs it on first boot using a temporary
+# local repository (offline) or the GitHub repository (online).
+# Pre-creating the add-on data would confuse the Supervisor when the
+# add-on is not yet in any repository.
 EOF
 
 # Tear down docker and unmount the data partition before shrinking

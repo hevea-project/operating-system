@@ -1,0 +1,18 @@
+config BR2_PACKAGE_HEVEA_GATEWAY
+	bool "Hevea Gateway"
+	depends on BR2_PACKAGE_HASSIO
+	help
+	  Install the Hevea Gateway bootstrap service that automatically
+	  sets up the Hevea Apps repository and installs the required
+	  add-ons (Hevea Gateway, Hevea Access Point, Hevea OpenVPN).
+
+	  This service runs once during first boot and creates a marker
+	  file to prevent re-execution on subsequent boots.
+
+	  Also downloads and embeds the Hevea add-on Docker images
+	  (gateway, access-point, openvpn) in the HAOS data partition
+	  for offline installation, along with a local add-on repository
+	  used as a temporary fallback when the device is offline
+	  (no internet access to GitHub).
+
+	  https://github.com/hevea-project

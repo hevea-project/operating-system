@@ -1,5 +1,5 @@
 [Unit]
-Description=Hevea bootstrap script
+Description=Hevea Gateway bootstrap
 DefaultDependencies=no
 After=haos-supervisor.service
 Wants=haos-supervisor.service
@@ -7,11 +7,11 @@ Wants=haos-supervisor.service
 # Run only once: install the Hevea store repo, then install addons.
 # ConditionPathExists=! checks that the marker file does NOT exist.
 # Once the service completes, the marker file is created by the script.
-ConditionPathExists=!/etc/hevea-bootstrap.complete
+ConditionPathExists=!/mnt/overlay/etc/hevea-gateway.complete
 
 [Service]
 Type=oneshot
-ExecStart=/usr/libexec/hevea-bootstrap.sh
+ExecStart=/usr/libexec/hevea-gateway.sh
 RemainAfterExit=yes
 SuccessExitStatus=2
 
