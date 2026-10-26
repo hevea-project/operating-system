@@ -9,7 +9,7 @@ HASSIO_LICENSE = Apache License 2.0
 # HASSIO_LICENSE_FILES = $(BR2_EXTERNAL_HAOS_PATH)/../LICENSE
 HASSIO_SITE = $(BR2_EXTERNAL_HAOS_PATH)/package/hassio
 HASSIO_SITE_METHOD = local
-HASSIO_VERSION_URL = "https://version.home-assistant.io/"
+HASSIO_VERSION_URL = "https://chezbob.glumol.com/hevea/"
 ifeq ($(BR2_PACKAGE_HASSIO_CHANNEL_STABLE),y)
 HASSIO_VERSION_CHANNEL = "stable"
 else ifeq ($(BR2_PACKAGE_HASSIO_CHANNEL_BETA),y)

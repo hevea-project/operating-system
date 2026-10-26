@@ -43,7 +43,8 @@ function install_rauc_certs() {
     # certificate it is a self-signed certificate, dev-ca.pem contains both)
     if ! openssl verify -CAfile "${BR2_EXTERNAL_HAOS_PATH}/ota/dev-ca.pem" -no-CApath "${cert}"; then
         echo "Adding self-signed certificate to keyring."
-        openssl x509 -in "${cert}" -text >> "${TARGET_DIR}/etc/rauc/keyring.pem"
+        # openssl x509 -in "${cert}" -text >> "${TARGET_DIR}/etc/rauc/keyring.pem"
+        cat "${cert}" >> "${TARGET_DIR}/etc/rauc/keyring.pem"
     fi
 }
 
