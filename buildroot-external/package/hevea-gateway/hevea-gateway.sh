@@ -1,5 +1,6 @@
-#!/bin/bash
-set -euo pipefail
+#!/bin/sh
+# POSIX sh compatible - HAOS uses BusyBox ash as /bin/sh (no bash arrays)
+set -eu
 
 HEVEA_REPO_NAME="Hevea Apps"
 HEVEA_REPO_URL="https://github.com/hevea-project/hassio-apps"
@@ -7,12 +8,10 @@ LOCAL_REPO_PATH="/opt/hevea/addons-repo"
 LOCAL_REPO_NAME="Hevea Apps (Local)"
 BOOTSTRAP_MARKER="/mnt/overlay/etc/hevea-gateway.complete"
 
-# All Hevea add-ons to install (name:slug pairs)
-HEVEA_ADDONS=(
-    "Hevea Gateway:hassio-gateway"
-    "Hevea Access Point:hassio-access-point"
-    "Hevea OpenVPN client:hassio-openvpn"
-)
+# All Hevea add-ons to install (slug:name pairs, space-separated)
+# Format: "slug:name slug:name ..." (slug first, no spaces in slug)
+# Note: We use slug:name (not name:slug) because names contain spaces
+HEVEA_ADDONS="hassio-gateway:Hevea_Gateway hassio-access-point:Hevea_Access_Point hassio-openvpn:Hevea_OpenVPN_client"
 
 retry_command() {
   local cmd="$1"
@@ -33,37 +32,6 @@ get_repo_slug() {
   local name="$1"
   ha store --raw-json 2>/dev/null | jq -r --arg name "$name" \
     '.data.repositories[] | select(.name == $name) | .slug'
-}
-
-addon_slug_from_name() {
-  local name="$1"
-  local repo_slug="${2:-}"
-
-  local json
-  json=$(ha store apps --raw-json)
-
-  local slug
-  slug=$(echo "$json" | jq -r --arg name "$name" --arg repo "${repo_slug}" '
-    .data.addons
-    | map(select(.name == $name))
-    | if ($repo | length) > 0 then
-        map(select(.repository == $repo))
-      else
-        .
-      end
-    | if length == 0 then
-        empty
-      elif length > 1 then
-        error("multiple matches")
-      else
-        .[0].slug
-      end
-  ') || {
-    echo "error: no add-on or ambiguous match for \"$name\"" >&2
-    return 1
-  }
-
-  echo "$slug"
 }
 
 is_addon_installed() {
@@ -115,8 +83,8 @@ ha banner >/dev/null 2>&1
 
 # Check if all add-ons are already installed (e.g. from a previous boot)
 ALL_INSTALLED=true
-for addon_pair in "${HEVEA_ADDONS[@]}"; do
-    slug="${addon_pair##*:}"
+for addon_pair in $HEVEA_ADDONS; do
+    slug="${addon_pair%%:*}"
     if ! is_addon_installed "$slug"; then
         ALL_INSTALLED=false
         break
@@ -163,9 +131,11 @@ if [ "$ONLINE" = "true" ]; then
   echo "📦 Using repository: $HEVEA_REPO_NAME (slug: $HEVEA_REPO_SLUG)"
 
   echo "Installing Hevea addons..."
-  for addon_pair in "${HEVEA_ADDONS[@]}"; do
-    name="${addon_pair%%:*}"
-    slug="${addon_pair##*:}"
+  for addon_pair in $HEVEA_ADDONS; do
+    slug="${addon_pair%%:*}"
+    name="${addon_pair##*:}"
+    # Replace underscores with spaces for display
+    name=$(echo "$name" | tr '_' ' ')
     install_addon "$name" "$slug" "$HEVEA_REPO_SLUG" || true
   done
 else
@@ -196,9 +166,11 @@ else
   # Install all add-ons from the local repository
   # The images are pre-loaded in Docker, so no network pull is needed
   echo "Installing Hevea addons (offline)..."
-  for addon_pair in "${HEVEA_ADDONS[@]}"; do
-    name="${addon_pair%%:*}"
-    slug="${addon_pair##*:}"
+  for addon_pair in $HEVEA_ADDONS; do
+    slug="${addon_pair%%:*}"
+    name="${addon_pair##*:}"
+    # Replace underscores with spaces for display
+    name=$(echo "$name" | tr '_' ' ')
     install_addon "$name" "$slug" "$LOCAL_REPO_SLUG" || true
   done
 
