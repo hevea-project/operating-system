@@ -28,7 +28,7 @@ HEVEA_GATEWAY_IMGDIR = $(BINARIES_DIR)/hevea-gateway
 define HEVEA_GATEWAY_BUILD_CMDS
 	$(Q)mkdir -p $(@D)/images
 	$(foreach addon,$(HEVEA_ADDONS),\
-		@echo "Downloading Hevea add-on image: ghcr.io/hevea-project/$(addon):$(HEVEA_ADDON_TAG) ($(HEVEA_ADDON_OCI_ARCH))"; \
+		echo "Downloading Hevea add-on image: ghcr.io/hevea-project/$(addon):$(HEVEA_ADDON_TAG) ($(HEVEA_ADDON_OCI_ARCH))"; \
 		skopeo copy --override-arch $(HEVEA_ADDON_OCI_ARCH) \
 			docker://ghcr.io/hevea-project/$(addon):$(HEVEA_ADDON_TAG) \
 			oci-archive:$(@D)/images/$(addon).tar:ghcr.io/hevea-project/$(addon):$(HEVEA_ADDON_TAG); \
