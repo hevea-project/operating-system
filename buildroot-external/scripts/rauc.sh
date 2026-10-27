@@ -39,11 +39,18 @@ function install_rauc_certs() {
         cp "${BR2_EXTERNAL_HAOS_PATH}/ota/rel-ca.pem" "${TARGET_DIR}/etc/rauc/keyring.pem"
     fi
 
+    # Add Hevea CA to the keyring (in addition to the official HA CAs)
+    # This allows the device to verify both official HA updates and Hevea updates
+    if [ -f "${BR2_EXTERNAL_HAOS_PATH}/ota/hevea-ca.pem" ]; then
+        echo "Adding Hevea CA to keyring."
+        cat "${BR2_EXTERNAL_HAOS_PATH}/ota/hevea-ca.pem" >> "${TARGET_DIR}/etc/rauc/keyring.pem"
+    fi
+
     # Add local self-signed certificate (if not trusted by the dev or release
     # certificate it is a self-signed certificate, dev-ca.pem contains both)
-    if ! openssl verify -CAfile "${BR2_EXTERNAL_HAOS_PATH}/ota/dev-ca.pem" -no-CApath "${cert}"; then
+    if ! openssl verify -CAfile "${TARGET_DIR}/etc/rauc/keyring.pem" -no-CApath "${cert}"; then
         echo "Adding self-signed certificate to keyring."
-        openssl x509 -in "${cert}" -text >> "${TARGET_DIR}/etc/rauc/keyring.pem"
+        cat "${cert}" >> "${TARGET_DIR}/etc/rauc/keyring.pem"
     fi
 }
 
