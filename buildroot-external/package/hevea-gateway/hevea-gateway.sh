@@ -145,35 +145,48 @@ FAILED=0
 REPO_READY=false
 
 # Ensure the GitHub repository is added, so the pre-installed add-ons are
-# known to the store and can be updated. Requires internet.
-if online; then
-  if repo_exists; then
-    echo "✅ Repository '$HEVEA_REPO_NAME' already added."
-  else
-    echo "Adding GitHub repository..."
-    ha store add "$HEVEA_REPO_URL" >/dev/null 2>&1 || echo "⚠️ Could not add GitHub repository"
+# known to the store and can be updated. Requires internet. At first boot
+# this script can run before the network (DHCP/DNS) or the Supervisor
+# plugins are ready, so retry the reachability check, the add and the sync
+# for a while before giving up (the bootstrap re-runs on the next boots
+# anyway when the marker is not set).
+REPO_READY=false
+attempt=0
+while [ "$attempt" -lt 5 ]; do
+  attempt=$((attempt + 1))
+  if ! online; then
+    sleep 5
+    continue
+  fi
+  if ! repo_exists; then
+    echo "Adding GitHub repository... (attempt $attempt)"
+    ha store add "$HEVEA_REPO_URL" >/dev/null 2>&1 || echo "⚠️ Could not add GitHub repository (attempt $attempt)"
   fi
   if repo_exists; then
-    # Wait for the repository to be synchronized (its add-ons visible in
-    # the store)
     echo "⏳ Waiting for the repository to sync..."
     i=0
-    while [ "$i" -lt 24 ]; do
+    while [ "$i" -lt 12 ]; do
       if repo_synced; then
         break
       fi
       sleep 5
       i=$((i + 1))
     done
-    if [ "$i" -lt 24 ]; then
+    if [ "$i" -lt 12 ]; then
       REPO_READY=true
       echo "✅ Repository '$HEVEA_REPO_NAME' ready (slug: $HEVEA_REPO_SLUG)."
-    else
-      echo "⚠️ Repository '$HEVEA_REPO_NAME' did not sync" >&2
+      break
     fi
+    echo "⚠️ Repository '$HEVEA_REPO_NAME' not synced yet (attempt $attempt)" >&2
   fi
-else
-  echo "⚠️ GitHub not reachable (offline mode)"
+  sleep 10
+done
+if [ "$REPO_READY" != "true" ]; then
+  if online; then
+    echo "⚠️ GitHub repository not ready yet, will retry on the next boot"
+  else
+    echo "⚠️ GitHub not reachable (offline mode)"
+  fi
 fi
 
 # The add-ons are pre-installed in the image (baked under the GitHub
