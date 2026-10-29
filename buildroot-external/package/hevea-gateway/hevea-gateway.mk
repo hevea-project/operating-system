@@ -11,6 +11,7 @@ HEVEA_GATEWAY_SITE_METHOD = local
 # Hevea add-on images (embedded in data partition for offline install)
 HEVEA_ADDONS = gateway hassio-access-point hassio-openvpn
 HEVEA_ADDON_TAG = 1.0.0
+HEVEA_REPO_URL = https://github.com/hevea-project/hassio-apps
 
 # Map buildroot arch to OCI platform arch for skopeo
 ifeq ($(BR2_aarch64),y)
@@ -35,29 +36,22 @@ define HEVEA_GATEWAY_BUILD_CMDS
 	)
 	# Pre-install state for the data partition: the Supervisor cannot install
 	# add-ons while the host is offline (its install job always pulls the
-	# image from the registry), so the add-ons are baked as already installed.
+	# image from the registry), so the add-ons are baked as already installed
+	# under the GitHub repository slug (the same add-ons as the repository
+	# provides, updatable once it is added).
 	$(Q)python3 $(HEVEA_GATEWAY_PKGDIR)/craft-apps-json.py \
-		$(HEVEA_GATEWAY_PKGDIR)/addons-repo $(@D)/apps.json
+		$(HEVEA_GATEWAY_PKGDIR)/addons-repo $(@D)/apps.json "$(HEVEA_REPO_URL)"
 endef
 
 define HEVEA_GATEWAY_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0755 $(HEVEA_GATEWAY_PKGDIR)/hevea-gateway.sh \
 		$(TARGET_DIR)/usr/libexec/hevea-gateway.sh
 
-	# Install the local add-on repository to the rootfs (used as
-	# temporary offline fallback by hevea-gateway.sh). It goes to
-	# /usr/share/hevea (not /opt/hevea): the HAOS post-build cleanup
-	# (fix_rootfs) removes the whole /opt directory from the target rootfs.
-	$(Q)mkdir -p $(TARGET_DIR)/usr/share/hevea/addons-repo
-	$(Q)cp -r $(HEVEA_GATEWAY_PKGDIR)/addons-repo/* \
-		$(TARGET_DIR)/usr/share/hevea/addons-repo/
-
 	# Install the add-on image tarballs and the pre-install state for
 	# create-data-partition.sh to pick up
 	$(Q)mkdir -p $(HEVEA_GATEWAY_IMGDIR)
 	$(Q)cp $(@D)/images/*.tar $(HEVEA_GATEWAY_IMGDIR)/
 	$(Q)cp $(@D)/apps.json $(HEVEA_GATEWAY_IMGDIR)/
-	$(Q)cp -r $(HEVEA_GATEWAY_PKGDIR)/addons-repo $(HEVEA_GATEWAY_IMGDIR)/
 endef
 
 define HEVEA_GATEWAY_INSTALL_INIT_SYSTEMD
