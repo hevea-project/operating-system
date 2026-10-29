@@ -11,6 +11,12 @@ hassio_api: true
 hassio_role: admin
 host_dbus: true
 host_network: true
+# GPIO access for the commissioning button (GPIO 17) and the RGB LED
+# (pkg/gateway/gpio.go): the Supervisor maps these devices into the container.
+devices:
+- /dev/gpiochip0
+- /dev/gpiochip1
+- /dev/gpiomem
 map:
 - homeassistant_config:rw
 webui: http://[HOST]:[PORT:7040]
