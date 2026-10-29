@@ -14,6 +14,12 @@ Type=oneshot
 ExecStart=/usr/libexec/hevea-gateway.sh
 RemainAfterExit=yes
 SuccessExitStatus=2
+# First boot may install add-ons (pulling their images): no start timeout.
+TimeoutStartSec=0
+# Show the bootstrap progress on the console (HDMI/serial) as well as in the
+# journal: it is the only feedback during a first boot.
+StandardOutput=journal+console
+StandardError=journal+console
 
 [Install]
 WantedBy=multi-user.target

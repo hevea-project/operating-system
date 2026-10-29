@@ -41,6 +41,12 @@ container=$(docker run --privileged -e DOCKER_TLS_CERTDIR="" \
 
 docker exec "${container}" sh /build/dind-import-containers.sh
 
+# Bake the Hevea add-ons pre-install state into the data partition (see
+# preinstall-hevea-apps.sh). Runs outside the heredoc below: the heredoc is
+# unquoted, so the outer shell would expand any shell variable used inside.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+sudo "${SCRIPT_DIR}/preinstall-hevea-apps.sh" "${HEVEA_IMGDIR}" "${data_dir}"
+
 sudo bash -ex <<EOF
 # Indicator for docker-prepare.service to use the containerd snapshotter
 touch "${data_dir}/.docker-use-containerd-snapshotter"
@@ -51,12 +57,6 @@ curl -fsL -o "${data_dir}/supervisor/apparmor/hassio-supervisor" "${APPARMOR_URL
 
 # Persist build-time updater channel
 jq -n --arg channel "${channel}" '{"channel": \$channel}' > "${data_dir}/supervisor/updater.json"
-
-# Note: The Hevea Gateway add-on is NOT pre-configured here. The
-# hevea-gateway service installs it on first boot using a temporary
-# local repository (offline) or the GitHub repository (online).
-# Pre-creating the add-on data would confuse the Supervisor when the
-# add-on is not yet in any repository.
 EOF
 
 # Tear down docker and unmount the data partition before shrinking
