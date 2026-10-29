@@ -4,8 +4,15 @@ set -eu
 
 HEVEA_REPO_NAME="Hevea Apps"
 HEVEA_REPO_URL="https://github.com/hevea-project/hassio-apps"
-LOCAL_REPO_PATH="/opt/hevea/addons-repo"
-LOCAL_REPO_NAME="Hevea Apps (Local)"
+# /usr/share (not /opt): the HAOS post-build cleanup (fix_rootfs) removes
+# the whole /opt directory from the target rootfs. Overridable for tests.
+LOCAL_APPS_SRC="${HEVEA_LOCAL_APPS_SRC:-/usr/share/hevea/addons-repo}"
+# The Supervisor always serves a built-in "local" repository scanning this
+# directory (the Supervisor /data is /mnt/data/supervisor on the host). The
+# Supervisor cannot add a plain directory as a repository (it expects a git
+# URL), so the offline fallback copies the add-on definitions there instead.
+# Overridable for tests.
+LOCAL_APPS_DIR="${HEVEA_LOCAL_APPS_DIR:-/mnt/data/supervisor/apps/local}"
 BOOTSTRAP_MARKER="/mnt/overlay/etc/hevea-gateway.complete"
 
 # All Hevea add-ons to install (slug:name pairs, space-separated)
@@ -34,10 +41,20 @@ get_repo_slug() {
     '.data.repositories[] | select(.name == $name) | .slug'
 }
 
-is_addon_installed() {
+# Print the slug under which an add-on is installed. The Supervisor prefixes
+# the slug of add-ons from custom repositories with the repository slug, so
+# the same add-on is "<repo>_hassio-gateway" from the GitHub repository and
+# "local_hassio-gateway" from the local repository. Prints nothing when the
+# add-on is not installed.
+installed_slug() {
   local slug="$1"
-  ha apps --raw-json 2>/dev/null | jq -e --arg slug "$slug" \
-    '.data.addons[] | select(.slug == $slug)' >/dev/null 2>&1
+  ha apps --raw-json 2>/dev/null | jq -r --arg slug "$slug" \
+    '.data.addons[] | select(.slug == $slug or (.slug | endswith("_" + $slug))) | .slug' \
+    | head -1
+}
+
+is_addon_installed() {
+  [ -n "$(installed_slug "$1")" ]
 }
 
 is_addon_running() {
@@ -55,15 +72,37 @@ repo_exists() {
 install_addon() {
   local name="$1"
   local slug="$2"
-  local repo_slug="$3"
 
+  # installed_slug also matches the effective (repository-prefixed) slug.
   if is_addon_installed "$slug"; then
     echo "✅ $name already installed"
     return 0
   fi
 
   echo "🚀 Installing: $name"
-  if ha store apps install "$slug" --raw-json >/dev/null 2>&1; then
+  # No --raw-json: with it the CLI exits 0 even when the install fails.
+  if ha store apps install "$slug" >/dev/null 2>&1; then
+    echo "   ✅ Done"
+    return 0
+  else
+    echo "   ❌ Failed" >&2
+    return 1
+  fi
+}
+
+start_gateway() {
+  local gw_slug
+  gw_slug=$(installed_slug "hassio-gateway")
+  if [ -z "$gw_slug" ]; then
+    echo "   ⚠️ Gateway not installed, cannot start" >&2
+    return 1
+  fi
+  if is_addon_running "$gw_slug"; then
+    echo "✅ Gateway already running"
+    return 0
+  fi
+  echo "🚀 Starting Hevea Gateway..."
+  if ha apps start "$gw_slug" >/dev/null 2>&1; then
     echo "   ✅ Done"
     return 0
   else
@@ -79,7 +118,9 @@ echo "⏳ Waiting for Home Assistant Supervisor to start..."
 retry_command "ha" "Failed to execute 'ha' after 6 attempts. It might be because the hassio_cli container is not running."
 
 # Now wait for the Supervisor itself to be ready
-ha banner >/dev/null 2>&1
+retry_command "ha banner >/dev/null 2>&1" "Failed to reach the Supervisor after 6 attempts. It might still be starting."
+
+FAILED=0
 
 # Check if all add-ons are already installed (e.g. from a previous boot)
 ALL_INSTALLED=true
@@ -98,106 +139,99 @@ if [ "$ALL_INSTALLED" = "true" ]; then
     echo "Adding GitHub repository for updates..."
     ha store add "$HEVEA_REPO_URL" >/dev/null 2>&1 || echo "⚠️ Could not add GitHub repository (offline?)"
   fi
-  # Start the gateway if not running
-  if ! is_addon_running "hassio-gateway"; then
-    echo "🚀 Starting Hevea Gateway..."
-    ha apps start "hassio-gateway" >/dev/null 2>&1 && echo "   ✅ Done" || echo "   ❌ Failed" >&2
-  fi
-  touch "$BOOTSTRAP_MARKER"
-  echo "=== Hevea Gateway Bootstrap complete ==="
-  exit 0
-fi
-
-# Add-ons not all installed yet — try online installation first, fall back to offline
-ONLINE=false
-
-if repo_exists "$HEVEA_REPO_NAME"; then
-  echo "✅ Repository '$HEVEA_REPO_NAME' already exists."
-  ONLINE=true
+  start_gateway || FAILED=1
 else
-  echo "Trying to add GitHub repository..."
-  if ha store add "$HEVEA_REPO_URL" >/dev/null 2>&1; then
-    echo "✅ Added repository '$HEVEA_REPO_NAME'."
-    ONLINE=true
+  # Add-ons not all installed yet — try online installation first, fall back to offline
+  ONLINE=false
+  REPO_SLUG=""
+
+  # `ha store add` succeeds even when the repository clone fails in the
+  # background, so it cannot detect the offline mode: check GitHub
+  # reachability directly.
+  if curl -s -o /dev/null -m 8 "$HEVEA_REPO_URL" 2>/dev/null; then
+    if ! repo_exists "$HEVEA_REPO_NAME"; then
+      echo "Adding GitHub repository..."
+      ha store add "$HEVEA_REPO_URL" >/dev/null 2>&1 || echo "⚠️ Could not add GitHub repository"
+    fi
+    if repo_exists "$HEVEA_REPO_NAME"; then
+      REPO_SLUG=$(get_repo_slug "$HEVEA_REPO_NAME")
+      # Wait for the repository to be synced (its add-ons visible in the store)
+      echo "⏳ Waiting for the repository to sync..."
+      i=0
+      while [ "$i" -lt 24 ]; do
+        if ha store apps --raw-json 2>/dev/null | jq -e --arg slug "$REPO_SLUG" \
+            '.data.addons[] | select(.repository == $slug)' >/dev/null 2>&1; then
+          break
+        fi
+        sleep 5
+        i=$((i + 1))
+      done
+      if [ "$i" -lt 24 ]; then
+        ONLINE=true
+        echo "✅ Repository '$HEVEA_REPO_NAME' ready (slug: $REPO_SLUG)."
+      else
+        echo "⚠️ Repository '$HEVEA_REPO_NAME' did not sync (offline?)"
+      fi
+    fi
   else
     echo "⚠️ GitHub not reachable (offline mode)"
   fi
-fi
 
-if [ "$ONLINE" = "true" ]; then
-  # === ONLINE MODE ===
-  # Install all add-ons from the GitHub repository
-  HEVEA_REPO_SLUG=$(get_repo_slug "$HEVEA_REPO_NAME")
-  echo "📦 Using repository: $HEVEA_REPO_NAME (slug: $HEVEA_REPO_SLUG)"
+  if [ "$ONLINE" = "true" ]; then
+    # === ONLINE MODE ===
+    # Install all add-ons from the GitHub repository
+    echo "📦 Using repository: $HEVEA_REPO_NAME (slug: $REPO_SLUG)"
 
-  echo "Installing Hevea addons..."
-  for addon_pair in $HEVEA_ADDONS; do
-    slug="${addon_pair%%:*}"
-    name="${addon_pair##*:}"
-    # Replace underscores with spaces for display
-    name=$(echo "$name" | tr '_' ' ')
-    install_addon "$name" "$slug" "$HEVEA_REPO_SLUG" || true
-  done
-else
-  # === OFFLINE MODE ===
-  # Temporarily add the local repository, install all add-ons, then remove it.
-  # This avoids conflicts with the GitHub repository when the device comes online.
-  echo "📦 Using local repository (temporary, offline mode)"
-
-  if [ ! -d "$LOCAL_REPO_PATH" ]; then
-    echo "❌ Local repository not found at $LOCAL_REPO_PATH" >&2
-    exit 1
-  fi
-
-  # Add the local repository temporarily
-  if ! ha store add "$LOCAL_REPO_PATH" >/dev/null 2>&1; then
-    echo "❌ Failed to add local repository" >&2
-    exit 1
-  fi
-  echo "✅ Added local repository temporarily"
-
-  # Get the local repository slug
-  LOCAL_REPO_SLUG=$(get_repo_slug "$LOCAL_REPO_NAME")
-  if [ -z "$LOCAL_REPO_SLUG" ] || [ "$LOCAL_REPO_SLUG" = "null" ]; then
-    echo "❌ Could not find local repository slug" >&2
-    exit 1
-  fi
-
-  # Install all add-ons from the local repository
-  # The images are pre-loaded in Docker, so no network pull is needed
-  echo "Installing Hevea addons (offline)..."
-  for addon_pair in $HEVEA_ADDONS; do
-    slug="${addon_pair%%:*}"
-    name="${addon_pair##*:}"
-    # Replace underscores with spaces for display
-    name=$(echo "$name" | tr '_' ' ')
-    install_addon "$name" "$slug" "$LOCAL_REPO_SLUG" || true
-  done
-
-  # Remove the local repository to avoid conflicts with GitHub later
-  echo "🗑️  Removing local repository (avoiding future conflicts)..."
-  if ha store remove "$LOCAL_REPO_SLUG" >/dev/null 2>&1; then
-    echo "   ✅ Removed"
+    echo "Installing Hevea addons..."
+    for addon_pair in $HEVEA_ADDONS; do
+      slug="${addon_pair%%:*}"
+      name="${addon_pair##*:}"
+      # Replace underscores with spaces for display
+      name=$(echo "$name" | tr '_' ' ')
+      install_addon "$name" "${REPO_SLUG}_${slug}" || FAILED=1
+    done
   else
-    echo "   ⚠️ Could not remove local repository" >&2
+    # === OFFLINE MODE ===
+    # The Supervisor cannot add a plain directory as a repository (it expects
+    # a git URL), but it always serves the built-in "local" repository which
+    # scans the local apps directory: copy the add-on definitions there and
+    # reload the store. The add-on images are pre-loaded in Docker (see the
+    # hevea-gateway buildroot package), so no network pull is needed.
+    echo "📦 Using local apps directory (offline mode)"
+
+    if [ ! -d "$LOCAL_APPS_SRC" ]; then
+      echo "❌ Local add-ons not found at $LOCAL_APPS_SRC" >&2
+      exit 1
+    fi
+
+    mkdir -p "$LOCAL_APPS_DIR"
+    for addon_pair in $HEVEA_ADDONS; do
+      slug="${addon_pair%%:*}"
+      rm -rf "$LOCAL_APPS_DIR/$slug"
+      cp -r "$LOCAL_APPS_SRC/$slug" "$LOCAL_APPS_DIR/$slug"
+    done
+    ha store reload >/dev/null 2>&1 || echo "⚠️ Could not reload the store" >&2
+
+    echo "Installing Hevea addons (offline)..."
+    for addon_pair in $HEVEA_ADDONS; do
+      slug="${addon_pair%%:*}"
+      name="${addon_pair##*:}"
+      # Replace underscores with spaces for display
+      name=$(echo "$name" | tr '_' ' ')
+      install_addon "$name" "local_${slug}" || FAILED=1
+    done
   fi
 
-  # Note: The add-ons stay installed even after the repository is removed.
-  # The Supervisor keeps add-on data in /data/addons/data/<slug>/.
+  # Start the Hevea Gateway addon
+  start_gateway || FAILED=1
 fi
 
-# Start the Hevea Gateway addon
-echo "🚀 Starting Hevea Gateway addon..."
-if is_addon_installed "hassio-gateway"; then
-  if ha apps start "hassio-gateway" >/dev/null 2>&1; then
-    echo "   ✅ Done"
-  else
-    echo "   ❌ Failed" >&2
-  fi
+# Create the marker file only on success, so systemd re-runs this service on
+# the next boot when the installation failed.
+if [ "$FAILED" -eq 0 ]; then
+  touch "$BOOTSTRAP_MARKER"
+  echo "=== Hevea Gateway Bootstrap complete ==="
 else
-  echo "   ⚠️ Gateway not installed, cannot start" >&2
+  echo "❌ Hevea Gateway Bootstrap failed" >&2
+  exit 1
 fi
-
-# Create marker file so systemd won't re-run this on next boot
-touch "$BOOTSTRAP_MARKER"
-echo "=== Hevea Gateway Bootstrap complete ==="

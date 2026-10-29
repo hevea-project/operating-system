@@ -10,6 +10,10 @@ url: https://github.com/hevea-project/hassio-apps/tree/master/hassio-access-poin
 image: ghcr.io/hevea-project/hassio-access-point
 boot: manual
 host_network: true
+# The run.sh script uses bashio, which reads the add-on options through the
+# Supervisor API when /data/options.json is not available.
+hassio_api: true
+hassio_role: admin
 apparmor: true
 host_dbus: true
 privileged:
@@ -24,7 +28,7 @@ options:
   broadcast: 192.168.99.255
   interface: wlan1
   hide_ssid: false
-  dhcp: false
+  dhcp: true
   dhcp_start_addr: 192.168.99.10
   dhcp_end_addr: 192.168.99.20
   allow_mac_addresses: []

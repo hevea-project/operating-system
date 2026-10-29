@@ -34,7 +34,10 @@ define HASSIO_BUILD_CMDS
 	)
 endef
 
-HASSIO_INSTALL_IMAGES = YES
+# When the Hevea Gateway package is enabled, it re-creates the data partition
+# itself after installing the Hevea add-on image tarballs (see
+# hevea-gateway.mk): skip the first pass here to avoid building it twice.
+HASSIO_INSTALL_IMAGES = $(if $(BR2_PACKAGE_HEVEA_GATEWAY),NO,YES)
 
 define HASSIO_INSTALL_IMAGES_CMDS
 	$(BR2_EXTERNAL_HAOS_PATH)/package/hassio/create-data-partition.sh "$(@D)" "$(BINARIES_DIR)" "$(HASSIO_VERSION_CHANNEL)" "$(DOCKER_ENGINE_VERSION)"

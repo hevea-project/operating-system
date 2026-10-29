@@ -33,6 +33,11 @@ define HEVEA_GATEWAY_BUILD_CMDS
 			docker://ghcr.io/hevea-project/$(addon):$(HEVEA_ADDON_TAG) \
 			oci-archive:$(@D)/images/$(addon).tar:ghcr.io/hevea-project/$(addon):$(HEVEA_ADDON_TAG); \
 	)
+	# Pre-install state for the data partition: the Supervisor cannot install
+	# add-ons while the host is offline (its install job always pulls the
+	# image from the registry), so the add-ons are baked as already installed.
+	$(Q)python3 $(HEVEA_GATEWAY_PKGDIR)/craft-apps-json.py \
+		$(HEVEA_GATEWAY_PKGDIR)/addons-repo $(@D)/apps.json
 endef
 
 define HEVEA_GATEWAY_INSTALL_TARGET_CMDS
@@ -40,14 +45,19 @@ define HEVEA_GATEWAY_INSTALL_TARGET_CMDS
 		$(TARGET_DIR)/usr/libexec/hevea-gateway.sh
 
 	# Install the local add-on repository to the rootfs (used as
-	# temporary offline fallback by hevea-gateway.sh)
-	$(Q)mkdir -p $(TARGET_DIR)/opt/hevea/addons-repo
+	# temporary offline fallback by hevea-gateway.sh). It goes to
+	# /usr/share/hevea (not /opt/hevea): the HAOS post-build cleanup
+	# (fix_rootfs) removes the whole /opt directory from the target rootfs.
+	$(Q)mkdir -p $(TARGET_DIR)/usr/share/hevea/addons-repo
 	$(Q)cp -r $(HEVEA_GATEWAY_PKGDIR)/addons-repo/* \
-		$(TARGET_DIR)/opt/hevea/addons-repo/
+		$(TARGET_DIR)/usr/share/hevea/addons-repo/
 
-	# Install the add-on image tarballs for create-data-partition.sh to pick up
+	# Install the add-on image tarballs and the pre-install state for
+	# create-data-partition.sh to pick up
 	$(Q)mkdir -p $(HEVEA_GATEWAY_IMGDIR)
 	$(Q)cp $(@D)/images/*.tar $(HEVEA_GATEWAY_IMGDIR)/
+	$(Q)cp $(@D)/apps.json $(HEVEA_GATEWAY_IMGDIR)/
+	$(Q)cp -r $(HEVEA_GATEWAY_PKGDIR)/addons-repo $(HEVEA_GATEWAY_IMGDIR)/
 endef
 
 define HEVEA_GATEWAY_INSTALL_INIT_SYSTEMD
@@ -55,4 +65,23 @@ define HEVEA_GATEWAY_INSTALL_INIT_SYSTEMD
 		$(TARGET_DIR)/usr/lib/systemd/system/hevea-gateway.service
 endef
 
+# Re-create the data partition once this package's image tarballs are
+# installed to $(BINARIES_DIR): the hassio package creates data.ext4 during
+# its own install, which runs before this package (it is a dependency), so
+# the Hevea add-on images would be missing from the preloaded Docker store.
+# create-data-partition.sh rebuilds data.ext4 from scratch, embedding both
+# the HAOS system images (hassio build dir) and the Hevea add-on images
+# ($(BINARIES_DIR)/hevea-gateway).
+HEVEA_GATEWAY_INSTALL_IMAGES = YES
+
+define HEVEA_GATEWAY_INSTALL_IMAGES_CMDS
+	$(BR2_EXTERNAL_HAOS_PATH)/package/hassio/create-data-partition.sh \
+		"$(BUILD_DIR)/hassio-$(HASSIO_VERSION)" "$(BINARIES_DIR)" \
+		"$(HASSIO_VERSION_CHANNEL)" "$(DOCKER_ENGINE_VERSION)"
+endef
+
 $(eval $(generic-package))
+
+# The images step embeds the tarballs installed by the target install:
+# run it after (also with parallel make).
+HEVEA_GATEWAY_TARGET_INSTALL_IMAGES: HEVEA_GATEWAY_TARGET_INSTALL_TARGET

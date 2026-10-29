@@ -46,6 +46,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         pigz \
         python3 \
         python3-matplotlib \
+        python3-yaml \
         python-is-python3 \
         qemu-utils \
         rsync \
