@@ -51,9 +51,15 @@ sudo bash -ex <<EOF
 # Indicator for docker-prepare.service to use the containerd snapshotter
 touch "${data_dir}/.docker-use-containerd-snapshotter"
 
-# Setup AppArmor
+# Setup AppArmor: download the Supervisor profile, falling back to the copy
+# shipped next to this script when the update server is unreachable — the
+# build must not depend on it. When the server is reachable the fresh file
+# is used (the local copy may lag behind).
 mkdir -p "${data_dir}/supervisor/apparmor"
-curl -fsL -o "${data_dir}/supervisor/apparmor/hassio-supervisor" "${APPARMOR_URL}"
+if ! curl -fsL -o "${data_dir}/supervisor/apparmor/hassio-supervisor" "${APPARMOR_URL}"; then
+    echo "WARNING: could not download ${APPARMOR_URL}, using the local copy" >&2
+    cp "${SCRIPT_DIR}/apparmor.txt" "${data_dir}/supervisor/apparmor/hassio-supervisor"
+fi
 
 # Persist build-time updater channel
 jq -n --arg channel "${channel}" '{"channel": \$channel}' > "${data_dir}/supervisor/updater.json"
