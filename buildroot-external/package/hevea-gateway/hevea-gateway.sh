@@ -56,10 +56,13 @@ is_addon_installed() {
   [ -n "$(installed_slug "$1")" ]
 }
 
+# "running" includes "starting": the Supervisor starts boot=auto add-ons by
+# itself at boot, and a start requested while one is already in progress is
+# rejected — that is not a failure.
 is_addon_running() {
   local slug="$1"
   ha apps --raw-json 2>/dev/null | jq -e --arg slug "$slug" \
-    '.data.addons[] | select(.slug == $slug and .state == "started")' >/dev/null 2>&1
+    '.data.addons[] | select(.slug == $slug and (.state == "started" or .state == "starting"))' >/dev/null 2>&1
 }
 
 # Whether the GitHub repository is in the store (checked by slug: the slug
@@ -110,13 +113,22 @@ start_gateway() {
     return 0
   fi
   echo "🚀 Starting Hevea Gateway..."
-  if ha apps start "$gw_slug" >/dev/null 2>&1; then
-    echo "   ✅ Done"
-    return 0
-  else
-    echo "   ❌ Failed" >&2
-    return 1
-  fi
+  local i
+  for i in 1 2 3 4 5; do
+    if ha apps start "$gw_slug" >/dev/null 2>&1; then
+      echo "   ✅ Done"
+      return 0
+    fi
+    # A rejected start is not a failure if the add-on ends up running (the
+    # Supervisor may be starting it by itself, see is_addon_running).
+    sleep 10
+    if is_addon_running "$gw_slug"; then
+      echo "   ✅ Done (already starting)"
+      return 0
+    fi
+  done
+  echo "   ❌ Failed" >&2
+  return 1
 }
 
 echo "=== Hevea Gateway Bootstrap ==="
