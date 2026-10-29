@@ -1,8 +1,13 @@
 [Unit]
 Description=Hevea Gateway bootstrap
 DefaultDependencies=no
-After=haos-supervisor.service
-Wants=haos-supervisor.service
+# Ordering only (never Requires=): the bootstrap must also run on offline
+# devices. network-online.target is reached when NetworkManager considers
+# the network online (it gives up after its own timeout, so this is bounded);
+# the script itself retries the connectivity check for cases systemd cannot
+# express (late DNS, Supervisor plugins not ready, ...).
+After=haos-supervisor.service network-online.target
+Wants=haos-supervisor.service network-online.target
 
 # Run only once: install the Hevea store repo, then install addons.
 # ConditionPathExists=! checks that the marker file does NOT exist.
