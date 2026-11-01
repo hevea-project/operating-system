@@ -13,6 +13,7 @@ APPARMOR_URL="https://chezbob.glumol.com/hevea/apparmor_${channel}.txt"
 
 # Hevea add-ons preload: image tarballs location (downloaded by hevea-gateway package)
 HEVEA_IMGDIR="${dst_dir}/hevea-gateway"
+HEVEA_REPO_URL="https://github.com/hevea-project/hassio-apps"
 
 # Copy all Hevea add-on images to build_dir/images so dind-import-containers.sh picks them up
 if [ -d "${HEVEA_IMGDIR}" ]; then
@@ -63,6 +64,15 @@ fi
 
 # Persist build-time updater channel
 jq -n --arg channel "${channel}" '{"channel": \$channel}' > "${data_dir}/supervisor/updater.json"
+
+# Bake the Hevea add-on repository into the store: the pre-installed add-ons
+# are baked under its slug (see preinstall-hevea-apps.sh), so the store must
+# know the repository from the first boot — otherwise HA reports a "missing
+# repository" for them while the device is still offline, and the bootstrap
+# would have to add it. The git clone (sync) still happens when online.
+jq -n --arg repo "${HEVEA_REPO_URL}" \
+  '{repositories: ["local", "core", "https://github.com/hassio-addons/repository", "https://github.com/esphome/home-assistant-addon", "https://github.com/music-assistant/home-assistant-addon", $repo]}' \
+  > "${data_dir}/supervisor/store.json"
 EOF
 
 # Tear down docker and unmount the data partition before shrinking
