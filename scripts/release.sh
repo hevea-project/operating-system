@@ -3,9 +3,10 @@
 #
 # This script:
 #   1. Bumps the version in buildroot-external/meta
-#   2. Builds the OS images for specified boards
-#   3. Copies the .raucb files to the update server
-#   4. Generates and publishes the stable.json version manifest
+#   2. Builds and pushes the patched Supervisor image (ghcr.io/hevea-project)
+#   3. Builds the OS images for specified boards
+#   4. Copies the .raucb files to the update server
+#   5. Generates and publishes the stable.json version manifest
 #
 # Usage:
 #   ./scripts/release.sh [options]
@@ -20,6 +21,9 @@
 #   --dry-run             Show what would be done without executing
 #   --skip-build          Skip the build step (use existing images)
 #   --skip-publish        Skip publishing to the server (local only)
+#   --skip-supervisor-image  Skip building/pushing the patched Supervisor image
+#                           (ghcr.io/hevea-project, needed before the OS build:
+#                           the build preloads it from version.json images.supervisor)
 #   -h, --help            Show this help
 #
 # Examples:
@@ -50,6 +54,7 @@ CHANNEL="stable"
 DRY_RUN=false
 SKIP_BUILD=false
 SKIP_PUBLISH=false
+SKIP_SUPERVISOR_IMAGE=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -63,6 +68,7 @@ while [[ $# -gt 0 ]]; do
         --dry-run) DRY_RUN=true; shift ;;
         --skip-build) SKIP_BUILD=true; shift ;;
         --skip-publish) SKIP_PUBLISH=true; shift ;;
+        --skip-supervisor-image) SKIP_SUPERVISOR_IMAGE=true; shift ;;
         -h|--help)
             sed -n '2,30p' "$0"
             exit 0
@@ -141,10 +147,24 @@ else
 fi
 
 # =============================================================================
-# Step 2: Build images
+# Step 2: Build and push the patched Supervisor image
+# =============================================================================
+# Must happen before the OS build: hassio.mk preloads the Supervisor image
+# listed in version.json images.supervisor (ghcr.io/hevea-project/...), and
+# haos-supervisor on the device pulls the same image.
+if [ "$SKIP_SUPERVISOR_IMAGE" = false ]; then
+    log_step "Step 2: Build and push the patched Supervisor image"
+    run_cmd "'${HAOS_ROOT}/scripts/build-supervisor-image.sh' --registry 'ghcr.io/hevea-project'"
+else
+    log_step "Step 2: Build Supervisor image (SKIPPED)"
+    log_warn "Assuming ghcr.io/hevea-project/<arch>-hassio-supervisor is already published"
+fi
+
+# =============================================================================
+# Step 3: Build images
 # =============================================================================
 if [ "$SKIP_BUILD" = false ]; then
-    log_step "Step 2: Build images"
+    log_step "Step 3: Build images"
 
     IFS=',' read -ra BOARD_ARRAY <<< "$BOARDS"
     for board in "${BOARD_ARRAY[@]}"; do
@@ -153,14 +173,14 @@ if [ "$SKIP_BUILD" = false ]; then
     done
     log_ok "Build complete"
 else
-    log_step "Step 2: Build images (SKIPPED)"
+    log_step "Step 3: Build images (SKIPPED)"
     log_warn "Using existing images"
 fi
 
 # =============================================================================
-# Step 3: Collect .raucb files
+# Step 4: Collect .raucb files
 # =============================================================================
-log_step "Step 3: Collect .raucb files"
+log_step "Step 4: Collect .raucb files"
 
 declare -A RAUCB_FILES  # board -> path to .raucb
 
@@ -214,9 +234,9 @@ if [ ${#RAUCB_FILES[@]} -eq 0 ]; then
 fi
 
 # =============================================================================
-# Step 4: Generate stable.json
+# Step 5: Generate version manifest
 # =============================================================================
-log_step "Step 4: Generate version manifest"
+log_step "Step 5: Generate version manifest"
 
 # Use the first board's output directory for version.json
 FIRST_BOARD=$(echo "$BOARDS" | cut -d',' -f1)
@@ -236,10 +256,10 @@ if [ "$DRY_RUN" = false ] && [ -f "$STABLE_JSON" ]; then
 fi
 
 # =============================================================================
-# Step 5: Publish to update server
+# Step 6: Publish to update server
 # =============================================================================
 if [ "$SKIP_PUBLISH" = false ]; then
-    log_step "Step 5: Publish to update server"
+    log_step "Step 6: Publish to update server"
 
     # Structure on server (matching the OTA URL pattern):
     #   ${SERVER_PATH}/${CHANNEL}.json                    ← version manifest
@@ -293,7 +313,7 @@ if [ "$SKIP_PUBLISH" = false ]; then
 
     log_ok "Published to ${SERVER_HOST}:${SERVER_PATH}"
 else
-    log_step "Step 5: Publish to update server (SKIPPED)"
+    log_step "Step 6: Publish to update server (SKIPPED)"
     log_warn "Files are ready locally:"
     for board_id in "${!RAUCB_FILES[@]}"; do
         log_info "  ${RAUCB_FILES[$board_id]}"

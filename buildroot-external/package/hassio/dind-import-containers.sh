@@ -20,7 +20,7 @@ done
 # Tag the Supervisor how the OS expects it to be tagged
 supervisor=$(docker images --filter "label=io.hass.type=supervisor" --quiet)
 arch=$(docker inspect --format '{{ index .Config.Labels "io.hass.arch" }}' "${supervisor}")
-docker tag "${supervisor}" "ghcr.io/home-assistant/${arch}-hassio-supervisor:latest"
+docker tag "${supervisor}" "ghcr.io/hevea-project/${arch}-hassio-supervisor:latest"
 
 # Ensure the Hevea add-on images are tagged correctly for offline installation
 # Images were loaded from *.tar files (downloaded by hevea-gateway package)
