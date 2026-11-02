@@ -1,0 +1,78 @@
+# Build and push the patched Hevea Supervisor image (ghcr.io/hevea-project).
+#
+# The image wraps the stock upstream Supervisor and patches only
+# URL_HASSIO_VERSION (docker/supervisor/Dockerfile), so devices fetch their
+# update metadata from the Hevea update server. Tagged with the upstream
+# Supervisor version read from buildroot-external/package/hassio/version.json.
+#
+# Triggers:
+#   - Manual only: Actions → Build Supervisor image → Run workflow
+#   - Optional input: supervisor version (default: .supervisor of version.json)
+
+name: Build Supervisor image
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Upstream Supervisor version to wrap (default: .supervisor from version.json)"
+        required: false
+        type: string
+
+jobs:
+  build:
+    name: Build and push ${{ matrix.arch }}-hassio-supervisor
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+          - arch: aarch64
+            platform: linux/arm64
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Read Supervisor version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            v="${{ inputs.version }}"
+          else
+            v="$(jq -r '.supervisor' buildroot-external/package/hassio/version.json)"
+          fi
+          echo "version=${v}" >> "$GITHUB_OUTPUT"
+          echo "Supervisor version: ${v}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push patched Supervisor image
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: docker/supervisor
+          file: docker/supervisor/Dockerfile
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            ARCH=${{ matrix.arch }}
+            VERSION=${{ steps.version.outputs.version }}
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.arch }}-hassio-supervisor:${{ steps.version.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.arch }}-hassio-supervisor:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
