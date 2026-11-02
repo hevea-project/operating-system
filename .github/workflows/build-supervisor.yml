@@ -18,6 +18,11 @@ on:
         description: "Upstream Supervisor version to wrap (default: .supervisor from version.json)"
         required: false
         type: string
+  # Also run on PRs targeting the default branch, so the workflow can be
+  # tested from a PR without merging first (the workflow file is read from
+  # the PR head branch).
+  pull_request:
+    branches: [hevea]
 
 jobs:
   build:
