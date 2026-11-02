@@ -16,6 +16,9 @@
 #   --update-server <url>  Your update server URL (default: https://chezbob.glumol.com/hevea)
 #   --output <file>      Output file (default: stable.json)
 #   --boards <list>      Comma-separated list of boards to include (default: all)
+#   --supervisor-image <image>  Supervisor image template
+#                        (default: ghcr.io/hevea-project/{arch}-hassio-supervisor — the
+#                        Hevea-patched image, see docker/supervisor/Dockerfile)
 #
 # Example:
 #   ./scripts/generate-version-json.sh output_rpi4_64 \
@@ -40,6 +43,9 @@ CHANNEL="stable"
 UPDATE_SERVER="https://chezbob.glumol.com/hevea"
 OUTPUT_FILE="stable.json"
 BOARDS_FILTER=""
+# The Hevea-patched Supervisor image (URL_HASSIO_VERSION only, see
+# docker/supervisor/Dockerfile), published by scripts/build-supervisor-image.sh
+SUPERVISOR_IMAGE="ghcr.io/hevea-project/{arch}-hassio-supervisor"
 
 # Parse arguments
 BUILD_DIR=""
@@ -49,6 +55,7 @@ while [[ $# -gt 0 ]]; do
         --update-server) UPDATE_SERVER="$2"; shift 2 ;;
         --output) OUTPUT_FILE="$2"; shift 2 ;;
         --boards) BOARDS_FILTER="$2"; shift 2 ;;
+        --supervisor-image) SUPERVISOR_IMAGE="$2"; shift 2 ;;
         -h|--help)
             head -30 "$0" | tail -25
             exit 0
@@ -183,6 +190,7 @@ jq -n \
     --argjson homeassistant "$HA_JSON" \
     --argjson hassos_upgrade "$HASSOS_UPGRADE" \
     --arg ota "$OTA_URL" \
+    --arg supervisor_image "$SUPERVISOR_IMAGE" \
     '
     # Start with the official version.json
     $v[0]
@@ -196,6 +204,9 @@ jq -n \
     + {"hassos-upgrade": $hassos_upgrade}
     # Override OTA URL (point to our update server)
     + {ota: $ota}
+    # Override the Supervisor image: the Hevea-patched one (URL_HASSIO_VERSION
+    # points to our update server), not the stock ghcr.io/home-assistant one
+    + {images: ($v[0].images + {supervisor: $supervisor_image})}
     ' > "$OUTPUT_FILE"
 
 echo "✅ Generated: ${OUTPUT_FILE}"
