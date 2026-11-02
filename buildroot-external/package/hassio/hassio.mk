@@ -37,12 +37,10 @@ define HASSIO_BUILD_CMDS
 		$(BR2_EXTERNAL_HAOS_PATH)/package/hassio/fetch-container-image.sh \
 			$(BR2_PACKAGE_HASSIO_ARCH) $(BR2_PACKAGE_HASSIO_MACHINE) $(@D)/version.json $(image) "$(HASSIO_DL_DIR)" "$(@D)/images"
 	)
-	# Patch the Supervisor image: point the runtime update check (OS and
-	# add-on updates) at the Hevea update server instead of the official
-	# version.home-assistant.io hardcoded in the Supervisor.
-	$(Q)chmod +x $(BR2_EXTERNAL_HAOS_PATH)/package/hassio/patch-supervisor-image.sh
-	$(Q)$(BR2_EXTERNAL_HAOS_PATH)/package/hassio/patch-supervisor-image.sh \
-		"$(@D)/images" "$(HASSIO_VERSION_URL)" "$(BR2_PACKAGE_HASSIO_ARCH)"
+	# The Supervisor image itself comes from the version.json (images.supervisor):
+	# point it at ghcr.io/hevea-project/hassio-supervisor (built FROM the upstream
+	# image with the update-server URL patched, see docker/hassio-supervisor), so
+	# runtime OS/add-on update checks go to the Hevea update server.
 endef
 
 # When the Hevea Gateway package is enabled, it re-creates the data partition
