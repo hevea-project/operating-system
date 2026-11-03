@@ -71,7 +71,7 @@ jq -n --arg channel "${channel}" '{"channel": \$channel}' > "${data_dir}/supervi
 # repository" for them while the device is still offline, and the bootstrap
 # would have to add it. The git clone (sync) still happens when online.
 jq -n --arg repo "${HEVEA_REPO_URL}" \
-  '{repositories: ["local", "core", "https://github.com/hassio-addons/repository", "https://github.com/esphome/home-assistant-addon", "https://github.com/music-assistant/home-assistant-addon", $repo]}' \
+  '{repositories: ["local", "core", "https://github.com/hassio-addons/repository", "https://github.com/esphome/home-assistant-addon", "https://github.com/music-assistant/home-assistant-addon", \$repo]}' \
   > "${data_dir}/supervisor/store.json"
 EOF
 
