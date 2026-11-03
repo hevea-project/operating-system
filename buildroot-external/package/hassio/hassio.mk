@@ -24,10 +24,8 @@ define HASSIO_CONFIGURE_CMDS
 	# Deploy only landing page for "core" by setting version to "landingpage".
 	# Fall back to the copy shipped next to this makefile when the update
 	# server is unreachable — the build must not depend on it.
-	if ! curl -sf $(HASSIO_VERSION_URL)$(HASSIO_VERSION_CHANNEL)".json" | jq '.core = "landingpage"' > $(@D)/version.json; then
-		echo "WARNING: could not download $(HASSIO_VERSION_URL)$(HASSIO_VERSION_CHANNEL).json, using the local copy" >&2
-		jq '.core = "landingpage"' $(HASSIO_SITE)/version.json > $(@D)/version.json
-	fi
+	# One recipe line = one shell: keep the if/fi on a single line.
+	if ! curl -sf $(HASSIO_VERSION_URL)$(HASSIO_VERSION_CHANNEL)".json" | jq '.core = "landingpage"' > $(@D)/version.json; then echo "WARNING: could not download $(HASSIO_VERSION_URL)$(HASSIO_VERSION_CHANNEL).json, using the local copy" >&2; jq '.core = "landingpage"' $(HASSIO_SITE)/version.json > $(@D)/version.json; fi
 endef
 
 define HASSIO_BUILD_CMDS
