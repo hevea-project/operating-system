@@ -1,0 +1,43 @@
+targets:
+  main:
+    resources: []
+
+    drivers:
+      - QEMUDriver:
+          qemu_bin: qemu-system-x86_64
+          machine: pc
+          cpu: host
+          memory: 2G
+          extra_args: >-
+            -snapshot
+            -enable-kvm
+            -smp 2
+            -drive if=none,id=usbd,file=./tests/hevea_test/usb.img,format=raw
+            -device qemu-xhci,id=xhci
+            -device usb-storage,bus=xhci.0,drive=usbd
+          nic: >-
+            user,model=virtio-net-pci,
+            hostfwd=tcp::8000-:80,
+            hostfwd=tcp::8123-:8123,
+            hostfwd=tcp::19000-:9000,
+            hostfwd=tcp::22222-:22
+          disk: haos-image
+          bios: bios
+      - CustomTimeoutShellDriver:
+          login_prompt: 'homeassistant login: '
+          username: 'root'
+          prompt: '# '
+          login_timeout: 600
+          command_timeout: 300
+      - QEMUShellStrategy: {}
+
+tools:
+  qemu-system-x86_64: /usr/bin/qemu-system-x86_64
+
+images:
+  haos-image: ./output_ova/images/haos_ova-18.4.qcow2
+  bios: /usr/share/ovmf/OVMF.fd
+
+
+imports:
+  - qemu_shell_strategy.py

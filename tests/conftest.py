@@ -9,8 +9,17 @@ import pytest
 logger = logging.getLogger(__name__)
 
 
+def _has_qemu(strategy) -> bool:
+    """Whether the current target uses the QEMU driver (vs physical hardware)."""
+    return hasattr(strategy, "qemu") or any(
+        type(d).__name__ == "QEMUDriver" for d in strategy.target.drivers.values()
+    )
+
+
 @pytest.fixture(scope="function")
 def without_internet(strategy):
+    if not _has_qemu(strategy):
+        pytest.skip("without_internet only applies to QEMU targets")
     default_nic = strategy.qemu.nic
     if strategy.status.name == "shell":
         strategy.transition("off")
@@ -23,7 +32,9 @@ def without_internet(strategy):
 
 @pytest.fixture(autouse=True, scope="module")
 def restart_qemu(strategy):
-    """Use fresh QEMU instance for each module."""
+    """Use fresh QEMU instance for each module (QEMU targets only)."""
+    if not _has_qemu(strategy):
+        return
     if strategy.status.name == "shell":
         logger.info("Restarting QEMU before %s module tests.", strategy.target.name)
         strategy.transition("off")
