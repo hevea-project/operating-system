@@ -6,13 +6,13 @@ targets:
       - QEMUDriver:
           qemu_bin: qemu-system-x86_64
           machine: pc
-          cpu: host
+          cpu: qemu64
           memory: 2G
           extra_args: >-
             -snapshot
-            -enable-kvm
+            -accel kvm
             -smp 2
-            -drive if=none,id=usbd,file=./tests/hevea_test/usb.img,format=raw
+            -drive if=none,id=usbd,file=hevea_test/usb.img,format=raw
             -device qemu-xhci,id=xhci
             -device usb-storage,bus=xhci.0,drive=usbd
           nic: >-
@@ -35,8 +35,8 @@ tools:
   qemu-system-x86_64: /usr/bin/qemu-system-x86_64
 
 images:
-  haos-image: ./output_ova/images/haos_ova-18.4.qcow2
-  bios: /usr/share/ovmf/OVMF.fd
+  haos-image: ../output_ova/images/haos_ova-18.4.qcow2
+  bios: /usr/share/edk2/ovmf/OVMF_CODE.fd
 
 
 imports:
