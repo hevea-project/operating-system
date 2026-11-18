@@ -17,7 +17,7 @@ _LOGGER = logging.getLogger(__name__)
 def _is_qemu(strategy) -> bool:
     """Detect whether we are running under QEMU (no real WiFi chipset)."""
     return hasattr(strategy, "qemu") or any(
-        type(d).__name__ == "QEMUDriver" for d in strategy.target.drivers.values()
+        type(d).__name__ == "QEMUDriver" for d in strategy.target.drivers
     )
 
 

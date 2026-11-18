@@ -18,8 +18,8 @@ SSH_KEY = os.path.join(SCRIPT_DIR, "test_ssh_key")
 
 def _get_ssh_target(strategy) -> tuple[str, int]:
     """Return (host, port) for SSH connection based on the strategy."""
-    drivers = {type(d).__name__: d for d in strategy.target.drivers.values()}
-    if "QEMUDriver" in drivers:
+    driver_names = [type(d).__name__ for d in strategy.target.drivers]
+    if "QEMUDriver" in driver_names:
         return "127.0.0.1", 22222
     # Physical RPi: use the NetworkService address
     rpi_ip = os.environ.get("RPI_IP", "192.168.1.100")

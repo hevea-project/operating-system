@@ -75,7 +75,7 @@ def test_boot_and_system_ready(shell, shell_json):
 
 def _is_qemu(strategy) -> bool:
     return hasattr(strategy, "qemu") or any(
-        type(d).__name__ == "QEMUDriver" for d in strategy.target.drivers.values()
+        type(d).__name__ == "QEMUDriver" for d in strategy.target.drivers
     )
 
 
