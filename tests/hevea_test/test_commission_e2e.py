@@ -136,12 +136,14 @@ def test_commission_via_vm_gateway(shell, shell_json, app_token_and_site):
     assert container, "Gateway container not found in VM"
     assert slug, "Gateway add-on slug not found"
     _LOGGER.info("Setting gateway app_addr=%s (container=%s slug=%s)", local_app_addr, container, slug)
-    shell.run_check(
-        f"docker exec {container} hevea addon-options set {slug} app_addr {local_app_addr}"
+    # run (not run_check): the command exits non-zero when the Supervisor is
+    # not ready to restart the add-on (HTTP 503), but the options ARE saved.
+    out = shell.run(
+        f"docker exec {container} hevea addon-options set {slug} app_addr {local_app_addr} 2>&1 || true"
     )
-    # SIGHUP reloads the config without restart (the Supervisor sends it after
-    # options change, but inside the container we send it manually)
-    shell.run_check(f"docker kill --signal=SIGHUP {container} || true")
+    _LOGGER.info("addon-options set output: %s", "\n".join(out))
+    # SIGHUP reloads the config without restart
+    shell.run_check(f"docker kill --signal=SIGHUP {container} 2>/dev/null || true")
     time.sleep(5)
 
     # Commission via the VM's gateway (host port 19000 -> VM port 9000)
