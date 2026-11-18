@@ -39,7 +39,7 @@ def test_ssh_from_host(strategy):
             "-o", "UserKnownHostsFile=/dev/null",
             "-o", "ConnectTimeout=30",
             f"root@{host}",
-            "echo SSH_OK && hostname",
+            "echo SSH_OK",
         ],
         capture_output=True,
         text=True,

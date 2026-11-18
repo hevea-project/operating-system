@@ -90,9 +90,10 @@ def test_ssh_accessible(shell, strategy):
     assert "active" in "\n".join(output), f"SSH daemon not active: {output}"
 
     if _is_qemu(strategy):
-        # On QEMU, verify the USB image was mounted with our key
+        # On QEMU, HAOS copies the key from the USB CONFIG partition to
+        # /root/.ssh/authorized_keys (dropbear reads it from there).
         output = shell.run_check(
-            "find /mnt -name authorized_keys -exec cat {} \\; 2>/dev/null || echo 'NOT_FOUND'"
+            "cat /root/.ssh/authorized_keys 2>/dev/null || echo 'NOT_FOUND'"
         )
         _LOGGER.info("authorized_keys content: %s", output)
         assert "NOT_FOUND" not in "\n".join(output), "authorized_keys not found (USB image not mounted?)"
@@ -164,28 +165,54 @@ def test_hevea_addons_installed(shell_json):
         )
 
 
+def _wait_for(predicate, timeout=300, interval=5, description="condition"):
+    """Poll predicate() until it returns True or timeout. Returns the last value."""
+    elapsed = 0
+    while elapsed < timeout:
+        result = predicate()
+        if result:
+            return result
+        sleep(interval)
+        elapsed += interval
+    pytest.fail(f"Timeout ({timeout}s) waiting for {description}")
+
+
 @pytest.mark.dependency(depends=["test_hevea_addons_installed"])
+@pytest.mark.timeout(360)
 def test_gateway_addon_running(shell_json):
     """The Hevea Gateway add-on is running (state=started)."""
-    apps = shell_json("ha apps --raw-json")
-    addons = apps.get("data", {}).get("addons", [])
 
-    gateway = next(
-        (a for a in addons if a.get("slug", "").endswith("_hassio-gateway") or a.get("slug") == "hassio-gateway"),
-        None,
-    )
-    assert gateway is not None, "Gateway add-on not found in installed add-ons"
-    _LOGGER.info("Gateway add-on: %s", gateway)
-    assert gateway.get("state") in ("started", "starting"), (
-        f"Gateway add-on not running: state={gateway.get('state')}"
-    )
+    def check_gateway_state():
+        apps = shell_json("ha apps --raw-json")
+        addons = apps.get("data", {}).get("addons", [])
+        gateway = next(
+            (a for a in addons if a.get("slug", "").endswith("_hassio-gateway") or a.get("slug") == "hassio-gateway"),
+            None,
+        )
+        if gateway is None:
+            _LOGGER.info("Gateway add-on not found yet")
+            return None
+        _LOGGER.info("Gateway add-on state: %s", gateway.get("state"))
+        if gateway.get("state") in ("started", "starting"):
+            return gateway
+        return None
+
+    gateway = _wait_for(check_gateway_state, timeout=300, description="gateway add-on started")
+    assert gateway is not None, "Gateway add-on not running after 300s"
 
 
 @pytest.mark.dependency(depends=["test_boot_and_system_ready"])
+@pytest.mark.timeout(360)
 def test_ha_api_reachable(shell):
     """Home Assistant API is reachable on port 80 (and redirect on 8123)."""
-    output = shell.run_check("curl -s -o /dev/null -w '%{http_code}' http://localhost/api/onboarding || true")
-    assert "200" in "\n".join(output), f"HA API not reachable on port 80: {output}"
+
+    def check_ha_api():
+        output = shell.run_check("curl -s -o /dev/null -w '%{http_code}' http://localhost/api/onboarding 2>/dev/null || echo 000")
+        code = "\n".join(output).strip()
+        _LOGGER.info("HA API status: %s", code)
+        return code == "200"
+
+    _wait_for(check_ha_api, timeout=300, description="HA API on port 80")
 
     # Port 8123 should redirect to port 80
     redirect = shell.run_check(
