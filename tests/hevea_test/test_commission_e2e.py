@@ -48,6 +48,19 @@ def _wait_for(predicate, timeout=300, interval=5, description="condition"):
     pytest.fail(f"Timeout ({timeout}s) waiting for {description}")
 
 
+def _wait_system_ready(shell, timeout=600):
+    """Wait until Supervisor and HA Core containers are running in the VM."""
+    def check():
+        for c in ("hassio_supervisor", "homeassistant"):
+            out = shell.run_check(
+                f"docker container inspect -f '{{{{.State.Status}}}}' {c} 2>/dev/null || echo missing"
+            )
+            if "running" not in "\n".join(out):
+                return False
+        return True
+    _wait_for(check, timeout=timeout, description="VM system ready (supervisor + HA)")
+
+
 @pytest.fixture(scope="module")
 def app_token_and_site():
     """Login to the app on the host and return (token, site_id)."""
@@ -97,7 +110,6 @@ def _find_gateway_slug(shell_json):
     return gw["slug"] if gw else None
 
 
-@pytest.mark.dependency(depends=["test_boot_and_system_ready"])
 @pytest.mark.timeout(600)
 def test_commission_via_vm_gateway(shell, shell_json, app_token_and_site):
     """POST /api/v1/commission to the gateway inside the VM.
@@ -108,6 +120,8 @@ def test_commission_via_vm_gateway(shell, shell_json, app_token_and_site):
     """
     token, site_id = app_token_and_site
     _LOGGER.info("Commissioning site %s via VM gateway", site_id)
+
+    _wait_system_ready(shell)
 
     # Point the gateway add-on at the local app (host = 10.0.2.2 in QEMU NAT)
     local_app_addr = os.environ.get("HEVEA_VM_APP_ADDR", "http://10.0.2.2:7030")
