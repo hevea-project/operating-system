@@ -91,11 +91,16 @@ def app_token_and_site():
     pytest.fail(f"App not reachable at {APP_URL}: {last_err}")
 
 
-def _find_gateway_container(shell):
-    """Return the docker container name of the gateway add-on in the VM."""
-    out = shell.run_check("docker ps --format '{{.Names}}' | grep hassio-gateway || true")
-    names = [n for n in "\n".join(out).split("\n") if n.strip()]
-    return names[0] if names else None
+def _find_gateway_container(shell, timeout=300):
+    """Return the docker container name of the gateway add-on in the VM (waits for it)."""
+    def check():
+        out = shell.run_check("docker ps --format '{{.Names}}' 2>/dev/null | grep -E 'gateway|app_' || true")
+        names = [n for n in "\n".join(out).split("\n") if n.strip() and "gateway" in n.lower()]
+        if names:
+            _LOGGER.info("Gateway container: %s", names[0])
+            return names[0]
+        return None
+    return _wait_for(check, timeout=timeout, description="gateway container running in VM")
 
 
 def _find_gateway_slug(shell_json):
