@@ -142,6 +142,9 @@ def test_commission_via_vm_gateway(shell, shell_json, app_token_and_site):
         f"docker exec {container} hevea addon-options set {slug} app_addr {local_app_addr} 2>&1 || true"
     )
     _LOGGER.info("addon-options set output: %s", str(out))
+    # Debug: read back the options from /data/options.json inside the container
+    opts_out = shell.run(f"docker exec {container} cat /data/options.json 2>/dev/null | grep -o '\"app_addr\":\"[^\"]*\"' || echo NOT_FOUND")
+    _LOGGER.info("options.json app_addr: %s", str(opts_out))
     # Restart the add-on so it picks up the new options from /data/options.json
     shell.run(f"ha apps restart {slug} --no-progress 2>&1 || true")
     _wait_for(
