@@ -142,8 +142,15 @@ def test_commission_via_vm_gateway(shell, shell_json, app_token_and_site):
         f"docker exec {container} hevea addon-options set {slug} app_addr {local_app_addr} 2>&1 || true"
     )
     _LOGGER.info("addon-options set output: %s", str(out))
-    # SIGHUP reloads the config without restart
-    shell.run_check(f"docker kill --signal=SIGHUP {container} 2>/dev/null || true")
+    # Restart the add-on so it picks up the new options from /data/options.json
+    shell.run(f"ha apps restart {slug} --no-progress 2>&1 || true")
+    _wait_for(
+        lambda: (lambda a: a and a.get("state") in ("started", "starting"))(
+            next((x for x in shell_json("ha apps --raw-json").get("data", {}).get("addons", [])
+                  if x.get("slug") == slug), None)
+        ),
+        timeout=120, description="gateway add-on restarted with new app_addr",
+    )
     time.sleep(5)
 
     # Commission via the VM's gateway (host port 19000 -> VM port 9000)
