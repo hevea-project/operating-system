@@ -39,8 +39,9 @@ def _wait_for(predicate, timeout=300, interval=5, description="condition"):
     elapsed = 0
     while elapsed < timeout:
         try:
-            if predicate():
-                return True
+            result = predicate()
+            if result:
+                return result
         except Exception:
             pass
         time.sleep(interval)
