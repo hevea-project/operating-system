@@ -78,21 +78,53 @@ def app_token_and_site():
     pytest.fail(f"App not reachable at {APP_URL}: {last_err}")
 
 
+def _find_gateway_container(shell):
+    """Return the docker container name of the gateway add-on in the VM."""
+    out = shell.run_check("docker ps --format '{{.Names}}' | grep hassio-gateway || true")
+    names = [n for n in "\n".join(out).split("\n") if n.strip()]
+    return names[0] if names else None
+
+
+def _find_gateway_slug(shell_json):
+    """Return the add-on slug of the gateway in the Supervisor."""
+    apps = shell_json("ha apps --raw-json")
+    addons = apps.get("data", {}).get("addons", [])
+    gw = next(
+        (a for a in addons if a.get("slug", "").endswith("_hassio-gateway")
+         or a.get("slug") == "hassio-gateway"),
+        None,
+    )
+    return gw["slug"] if gw else None
+
+
 @pytest.mark.dependency(depends=["test_boot_and_system_ready"])
 @pytest.mark.timeout(600)
 def test_commission_via_vm_gateway(shell, shell_json, app_token_and_site):
     """POST /api/v1/commission to the gateway inside the VM.
 
-    The gateway downloads the site config from the app (reachable via
-    10.0.2.2:7030 inside the VM... but the gateway uses its own app_addr
-    config). In the HAOS image, the gateway add-on's app_addr points to
-    the production app; for local testing it must point to the host.
+    First points the gateway's app_addr at the local docker-compose app
+    via `hevea addon-options set` inside the gateway container (the host
+    is reachable from QEMU user-mode NAT at 10.0.2.2).
     """
     token, site_id = app_token_and_site
     _LOGGER.info("Commissioning site %s via VM gateway", site_id)
 
-    # The commission endpoint on the VM gateway may be locked (portal running
-    # means it's accessible). The AP portal should be running in the image.
+    # Point the gateway add-on at the local app (host = 10.0.2.2 in QEMU NAT)
+    local_app_addr = os.environ.get("HEVEA_VM_APP_ADDR", "http://10.0.2.2:7030")
+    container = _find_gateway_container(shell)
+    slug = _find_gateway_slug(shell_json)
+    assert container, "Gateway container not found in VM"
+    assert slug, "Gateway add-on slug not found"
+    _LOGGER.info("Setting gateway app_addr=%s (container=%s slug=%s)", local_app_addr, container, slug)
+    shell.run_check(
+        f"docker exec {container} hevea addon-options set {slug} app_addr {local_app_addr}"
+    )
+    # SIGHUP reloads the config without restart (the Supervisor sends it after
+    # options change, but inside the container we send it manually)
+    shell.run_check(f"docker kill --signal=SIGHUP {container} || true")
+    time.sleep(5)
+
+    # Commission via the VM's gateway (host port 19000 -> VM port 9000)
     r = requests.post(
         f"{GATEWAY_VM_URL}/api/v1/commission",
         json={"token": token, "site_id": site_id, "email": ADMIN_EMAIL},
