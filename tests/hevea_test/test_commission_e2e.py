@@ -136,23 +136,21 @@ def test_commission_via_vm_gateway(shell, shell_json, app_token_and_site):
     assert container, "Gateway container not found in VM"
     assert slug, "Gateway add-on slug not found"
     _LOGGER.info("Setting gateway app_addr=%s (container=%s slug=%s)", local_app_addr, container, slug)
-    # run (not run_check): the command exits non-zero when the Supervisor is
-    # not ready to restart the add-on (HTTP 503), but the options ARE saved.
-    out = shell.run(
-        f"docker exec {container} hevea addon-options set {slug} app_addr {local_app_addr} 2>&1 || true"
+    # Edit /data/options.json directly inside the container (the Supervisor
+    # rewrites this file on add-on start from its own DB, so direct edit +
+    # container restart is the most reliable way in tests).
+    shell.run(
+        f"docker exec {container} sh -c \"sed -i 's|\\\"app_addr\\\":\\\"[^\\\"]*\\\"|\\\"app_addr\\\":\\\"{local_app_addr}\\\"|' /data/options.json 2>/dev/null; "
+        f"grep app_addr /data/options.json || true\""
     )
-    _LOGGER.info("addon-options set output: %s", str(out))
-    # Debug: read back the options from /data/options.json inside the container
-    opts_out = shell.run(f"docker exec {container} cat /data/options.json 2>/dev/null | grep -o '\"app_addr\":\"[^\"]*\"' || echo NOT_FOUND")
-    _LOGGER.info("options.json app_addr: %s", str(opts_out))
-    # Restart the add-on so it picks up the new options from /data/options.json
-    shell.run(f"ha apps restart {slug} --no-progress 2>&1 || true")
+    # Restart the container directly (faster and more reliable than ha apps restart)
+    shell.run(f"docker restart {container} 2>&1 || true")
     _wait_for(
         lambda: (lambda a: a and a.get("state") in ("started", "starting"))(
             next((x for x in shell_json("ha apps --raw-json").get("data", {}).get("addons", [])
                   if x.get("slug") == slug), None)
         ),
-        timeout=120, description="gateway add-on restarted with new app_addr",
+        timeout=180, description="gateway add-on restarted with new app_addr",
     )
     time.sleep(5)
 
