@@ -141,7 +141,7 @@ def test_commission_via_vm_gateway(shell, shell_json, app_token_and_site):
     out = shell.run(
         f"docker exec {container} hevea addon-options set {slug} app_addr {local_app_addr} 2>&1 || true"
     )
-    _LOGGER.info("addon-options set output: %s", "\n".join(out))
+    _LOGGER.info("addon-options set output: %s", str(out))
     # SIGHUP reloads the config without restart
     shell.run_check(f"docker kill --signal=SIGHUP {container} 2>/dev/null || true")
     time.sleep(5)
