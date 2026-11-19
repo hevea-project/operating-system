@@ -31,6 +31,20 @@ HEVEA_ADDON_SLUGS = [
 BOOTSTRAP_MARKER = "/mnt/overlay/etc/hevea-gateway.complete"
 
 
+def _wait_for(predicate, timeout=300, interval=5, description="condition"):
+    """Poll predicate() until it returns truthy or timeout."""
+    elapsed = 0
+    while elapsed < timeout:
+        try:
+            if predicate():
+                return True
+        except Exception:
+            pass
+        sleep(interval)
+        elapsed += interval
+    pytest.fail(f"Timeout ({timeout}s) waiting for {description}")
+
+
 def _wait_for_system_ready(shell, shell_json, timeout=600):
     """Wait until the Supervisor and Home Assistant Core are ready."""
     def check_container_running(container_name):
@@ -104,23 +118,17 @@ def test_ssh_accessible(shell, strategy):
 @pytest.mark.timeout(600)
 def test_gateway_service_ran(shell):
     """The hevea-gateway systemd service is active and completed its bootstrap."""
-    # Check the service is active
-    output = shell.run_check("systemctl is-active hevea-gateway.service || true")
-    assert "active" in "\n".join(output), f"hevea-gateway.service not active: {output}"
+    def check_bootstrap_done():
+        # Service must be active
+        out = shell.run_check("systemctl is-active hevea-gateway.service 2>/dev/null || echo inactive")
+        if "active" not in "\n".join(out):
+            return False
+        # Bootstrap marker or completion log
+        marker = shell.run_check(f"test -f {BOOTSTRAP_MARKER} && echo EXISTS || echo MISSING")
+        logs = shell.run_check("journalctl -u hevea-gateway.service --no-pager -n 50 2>/dev/null || true")
+        return "EXISTS" in "\n".join(marker) or "Bootstrap complete" in "\n".join(logs)
 
-    # Check the service ran without errors (check journal for the bootstrap completion)
-    output = shell.run_check(
-        "journalctl -u hevea-gateway.service --no-pager -n 50 || true"
-    )
-    _LOGGER.info("hevea-gateway.service logs:\n%s", "\n".join(output))
-
-    # The bootstrap script creates a marker file on success (when online)
-    # or logs completion. Check either the marker or the log message.
-    marker = shell.run_check(f"test -f {BOOTSTRAP_MARKER} && echo EXISTS || echo MISSING")
-    logs_contain_complete = "Bootstrap complete" in "\n".join(output)
-    assert "EXISTS" in "\n".join(marker) or logs_contain_complete, (
-        f"Bootstrap did not complete: marker={marker}, logs contain complete={logs_contain_complete}"
-    )
+    _wait_for(check_bootstrap_done, timeout=300, description="hevea-gateway bootstrap complete")
 
 
 @pytest.mark.dependency(depends=["test_gateway_service_ran"])

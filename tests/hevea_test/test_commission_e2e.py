@@ -50,16 +50,14 @@ def _wait_for(predicate, timeout=300, interval=5, description="condition"):
 
 
 def _wait_system_ready(shell, timeout=600):
-    """Wait until Supervisor and HA Core containers are running in the VM."""
+    """Wait until the Supervisor API answers in the VM (containers may be
+    'running' but the API not ready yet)."""
     def check():
-        for c in ("hassio_supervisor", "homeassistant"):
-            out = shell.run_check(
-                f"docker container inspect -f '{{{{.State.Status}}}}' {c} 2>/dev/null || echo missing"
-            )
-            if "running" not in "\n".join(out):
-                return False
-        return True
-    _wait_for(check, timeout=timeout, description="VM system ready (supervisor + HA)")
+        out = shell.run(
+            "ha banner >/dev/null 2>&1 && echo OK || echo NOT_READY"
+        )
+        return "OK" in str(out)
+    _wait_for(check, timeout=timeout, description="VM Supervisor API ready")
 
 
 @pytest.fixture(scope="module")
