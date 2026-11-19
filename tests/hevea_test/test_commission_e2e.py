@@ -255,11 +255,11 @@ def test_ha_login_with_hevea_credentials(shell):
         except (json.JSONDecodeError, KeyError):
             return False
 
-    try:
-        _wait_for(check_ha_login, timeout=180, description="HA login with Hevea credentials")
-    except Exception:
+    # Run once to get debug info, then wait
+    ok = check_ha_login()
+    if not ok:
         ha_logs = shell.run("docker logs --tail 30 homeassistant 2>&1 || true")
-        auth_cfg = shell.run("cat /config/configuration.yaml 2>/dev/null | grep -A5 auth_providers || echo NO_AUTH_PROVIDERS")
+        auth_cfg = shell.run("grep -A5 auth_providers /config/configuration.yaml 2>/dev/null || echo NO_AUTH_PROVIDERS")
         shim = shell.run("ls -la /config/hevea-auth.py 2>/dev/null || echo NO_SHIM")
         print(f"\n===== HA LOGIN DEBUG =====\nSHIM: {shim}\nAUTH_CFG: {auth_cfg}\nHA LOGS:\n{ha_logs}\n==========================\n")
-        raise
+    _wait_for(check_ha_login, timeout=180, description="HA login with Hevea credentials")
