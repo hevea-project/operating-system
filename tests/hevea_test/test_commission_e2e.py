@@ -136,15 +136,21 @@ def test_commission_via_vm_gateway(shell, shell_json, app_token_and_site):
     assert container, "Gateway container not found in VM"
     assert slug, "Gateway add-on slug not found"
     _LOGGER.info("Setting gateway app_addr=%s (container=%s slug=%s)", local_app_addr, container, slug)
-    # Edit /data/options.json directly inside the container (the Supervisor
-    # rewrites this file on add-on start from its own DB, so direct edit +
-    # container restart is the most reliable way in tests).
-    shell.run(
-        f"docker exec {container} sh -c \"sed -i 's|\\\"app_addr\\\":\\\"[^\\\"]*\\\"|\\\"app_addr\\\":\\\"{local_app_addr}\\\"|' /data/options.json 2>/dev/null; "
-        f"grep app_addr /data/options.json || true\""
+    # Use the hevea CLI (talks to the Supervisor API — the source of truth for
+    # options; the Supervisor rewrites /data/options.json on add-on start).
+    out = shell.run(
+        f"docker exec {container} hevea addon-options set {slug} app_addr {local_app_addr} 2>&1 || true"
     )
-    # Restart the container directly (faster and more reliable than ha apps restart)
-    shell.run(f"docker restart {container} 2>&1 || true")
+    _LOGGER.info("addon-options set: %s", str(out))
+    # Verify via the Supervisor API (not the file)
+    get_out = shell.run(f"docker exec {container} hevea addon-options get {slug} app_addr 2>&1 || true")
+    _LOGGER.info("addon-options get app_addr: %s", str(get_out))
+    # Restart the add-on via the Supervisor (it recreates the container with
+    # the new options). Retry: the Supervisor may return 503 while busy.
+    def restart_ok():
+        r = shell.run(f"ha apps restart {slug} --no-progress --raw-json 2>&1 || true")
+        return "ok" in str(r).lower() or "started" in str(r).lower()
+    _wait_for(restart_ok, timeout=180, description="gateway add-on restart via Supervisor")
     _wait_for(
         lambda: (lambda a: a and a.get("state") in ("started", "starting"))(
             next((x for x in shell_json("ha apps --raw-json").get("data", {}).get("addons", [])
