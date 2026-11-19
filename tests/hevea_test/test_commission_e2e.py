@@ -205,11 +205,14 @@ def test_vpn_connectivity(shell):
     try:
         _wait_for(check_vpn_ip, timeout=180, description="VPN tunnel up with 10.8.x.x IP")
     except Exception:
-        # Dump OpenVPN add-on logs for debugging
-        ovpn_container = shell.run("docker ps --format '{{.Names}}' | grep openvpn || true")
-        logs = shell.run(f"docker logs --tail 50 {ovpn_container} 2>&1 || true")
-        _LOGGER.error("OpenVPN container: %s\nLogs: %s", ovpn_container, logs)
-        raise
+        # Dump OpenVPN add-on logs for debugging (fail with them in the message)
+        ovpn_container = shell.run("docker ps --format '{{.Names}}' | grep openvpn || echo NONE")
+        cname = "\n".join(ovpn_container).strip() or "NONE"
+        logs = shell.run(f"docker logs --tail 80 {cname} 2>&1 || true")
+        ip_out = shell.run("ip addr 2>/dev/null || true")
+        route_out = shell.run("ip route 2>/dev/null || true")
+        pytest.fail(f"VPN tunnel timeout. OpenVPN container={cname}\n"
+                    f"LOGS:\n{logs}\nIP:\n{ip_out}\nROUTE:\n{route_out}")
 
     # Ping the OpenVPN server gateway (10.8.0.1)
     out = shell.run_check("ping -c 3 -W 5 10.8.0.1 2>/dev/null || true")
