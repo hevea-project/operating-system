@@ -12,7 +12,7 @@ targets:
             -snapshot
             -accel kvm
             -smp 2
-            -drive if=none,id=usbd,file=tests/hevea_test/usb.img,format=raw
+            -drive if=none,id=usbd,file=hevea_test/usb.img,format=raw
             -device qemu-xhci,id=xhci
             -device usb-storage,bus=xhci.0,drive=usbd
           nic: "user,model=virtio-net-pci,hostfwd=tcp::8000-:80,hostfwd=tcp::8123-:8123,hostfwd=tcp::19000-:9000,hostfwd=tcp::22222-:22222"
