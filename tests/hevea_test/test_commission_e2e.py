@@ -172,7 +172,7 @@ def test_commission_via_vm_gateway(shell, shell_json, app_token_and_site):
     assert data.get("status") == "success", f"Commission not successful: {data}"
 
 
-@pytest.mark.dependency(depends=["test_commission_via_vm_gateway"])
+
 @pytest.mark.timeout(300)
 def test_openvpn_addon_configured(shell_json):
     """The OpenVPN add-on inside the VM received certificates and is running."""
@@ -192,7 +192,7 @@ def test_openvpn_addon_configured(shell_json):
     _wait_for(check, timeout=180, description="OpenVPN add-on started")
 
 
-@pytest.mark.dependency(depends=["test_openvpn_addon_configured"])
+
 @pytest.mark.timeout(300)
 def test_vpn_connectivity(shell):
     """The VM has a VPN IP (10.8.0.x) and can ping the OpenVPN server."""
@@ -211,7 +211,7 @@ def test_vpn_connectivity(shell):
     assert "0% packet loss" in text or "3 received" in text, f"VPN ping failed: {text}"
 
 
-@pytest.mark.dependency(depends=["test_commission_via_vm_gateway"])
+
 @pytest.mark.timeout(300)
 def test_ha_login_with_hevea_credentials(shell):
     """HA web UI accepts the Hevea credentials via the command_line auth provider."""
