@@ -205,12 +205,15 @@ def test_vpn_connectivity(shell):
     try:
         _wait_for(check_vpn_ip, timeout=180, description="VPN tunnel up with 10.8.x.x IP")
     except Exception:
-        # Dump OpenVPN add-on logs for debugging (fail with them in the message)
-        ovpn_container = shell.run("docker ps --format '{{.Names}}' | grep openvpn || echo NONE")
+        ovpn_container = shell.run("docker ps --format '{{.Names}}' | grep -i openvpn || echo NONE")
         cname = "\n".join(ovpn_container).strip() or "NONE"
-        logs = shell.run(f"docker logs --tail 15 {cname} 2>&1 || true")
+        logs = shell.run(f"docker logs --tail 30 {cname} 2>&1 || true")
         ip_out = shell.run("ip -4 addr 2>/dev/null | grep inet || true")
-        pytest.fail(f"VPN timeout. container={cname}\nLOGS:\n{logs}\nIP:\n{ip_out}")
+        print(f"\n===== VPN DEBUG container={cname} =====")
+        print("LOGS:", logs)
+        print("IP:", ip_out)
+        print("========================================\n")
+        raise
 
     # Ping the OpenVPN server gateway (10.8.0.1)
     out = shell.run_check("ping -c 3 -W 5 10.8.0.1 2>/dev/null || true")
@@ -252,4 +255,11 @@ def test_ha_login_with_hevea_credentials(shell):
         except (json.JSONDecodeError, KeyError):
             return False
 
-    _wait_for(check_ha_login, timeout=180, description="HA login with Hevea credentials")
+    try:
+        _wait_for(check_ha_login, timeout=180, description="HA login with Hevea credentials")
+    except Exception:
+        ha_logs = shell.run("docker logs --tail 30 homeassistant 2>&1 || true")
+        auth_cfg = shell.run("cat /config/configuration.yaml 2>/dev/null | grep -A5 auth_providers || echo NO_AUTH_PROVIDERS")
+        shim = shell.run("ls -la /config/hevea-auth.py 2>/dev/null || echo NO_SHIM")
+        print(f"\n===== HA LOGIN DEBUG =====\nSHIM: {shim}\nAUTH_CFG: {auth_cfg}\nHA LOGS:\n{ha_logs}\n==========================\n")
+        raise
