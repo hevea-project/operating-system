@@ -63,3 +63,23 @@ RPI_IP=192.168.1.100 pytest --lg-env hevea-rpi-strategy.yaml hevea_test/test_wif
 
 - `test_ssh_key` : clé privée (ne pas commiter en prod)
 - `test_ssh_key.pub` : clé publique injectée dans `usb.img`
+
+## RPi4 physique — PXE (diskless, 100% automatisé)
+
+Prérequis host PC :
+1. Serveur DHCP+TFTP+HTTP (ex: dnsmasq) qui sert les fichiers boot de l'image RPi4
+   (kernel, dtbs, cmdline.txt, config.txt, rootfs)
+2. RPi4 sans SD, EEPROM en boot order réseau (ou boot SD d'abord)
+3. Prise Matter dans Home Assistant pour l'alim du RPi
+
+Lancement :
+```bash
+cd tests
+source venv/bin/activate
+export HA_TOKEN=<long-lived token HA>
+export RPI_SWITCH=switch.prise_rpi4
+export RPI_IP=192.168.1.100
+pytest --lg-env hevea-rpi-pxe-strategy.yaml hevea_test/ -v
+```
+
+La stratégie : power off (HA) → power on (HA) → PXE boot → attente SSH → tests.
