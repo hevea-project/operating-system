@@ -1,0 +1,51 @@
+# Full automation strategy for a physical Raspberry Pi 4B via PXE boot:
+# - no SD card needed: the RPi4 boots the HAOS kernel/initramfs over the network
+# - power on/off via a Home Assistant switch (Matter plug)
+# - tests run over SSH once booted
+#
+# Prerequisites on the host PC:
+#   1. DHCP + TFTP + HTTP server serving the HAOS RPi4 boot files:
+#      - kernel: output_rpi4/images/boot/Image (or extracted from the .img)
+#      - initramfs: output_rpi4/images/boot/initramfs (if any)
+#      - cmdline.txt, config.txt, dtbs
+#      - rootfs: the HAOS rootfs served over NFS or HTTP (or embedded in initramfs)
+#   2. dnsmasq config example:
+#        dhcp-boot=bootcode.bin
+#        dhcp-boot=pxelinux.0  (or direct kernel boot)
+#        enable-tftp
+#        tftp-root=/srv/tftp
+#      For direct kernel boot (RPi4 style):
+#        dhcp-match=set:pi4,option:client-arch,0,7  (or vendor class)
+#        dhcp-boot=tag:pi4,kernel8.img,cmdline.txt
+#   3. RPi4 with EEPROM configured for network boot (usbboot once to set
+#      BOOT_ORDER=0x21: SD, then network) — or just no SD inserted
+#
+# Environment variables:
+#   HA_URL       Home Assistant URL (default http://localhost:8123)
+#   HA_TOKEN     Long-lived access token
+#   RPI_SWITCH   HA switch entity for the RPi power (default switch.rpi4)
+#   RPI_IP       IP assigned to the RPi by DHCP (fixed via MAC reservation)
+
+imports:
+  - qemu_shell_strategy.py
+  - hevea_rpi_power_driver.py
+  - hevea_rpi_pxe_strategy.py
+
+targets:
+  rpi4:
+    resources:
+      - NetworkService:
+          address: ${RPI_IP}
+          username: root
+
+    drivers:
+      - HomeAssistantPowerDriver:
+          ha_url: ${HA_URL:-http://localhost:8123}
+          ha_token: ${HA_TOKEN}
+          entity: ${RPI_SWITCH:-switch.rpi4}
+      - SSHDriver:
+          key: ./hevea_test/test_ssh_key
+          connection_timeout: 60
+      - CustomTimeoutShellDriver:
+          command_timeout: 300
+      - RPiPXEStrategy: {}
