@@ -8,8 +8,10 @@ hardware needed). Requires a long-lived access token from HA
 import attr
 import requests
 from labgrid.driver import Driver
+from labgrid.target import target_factory
 
 
+@target_factory.reg_driver
 @attr.s(eq=False)
 class HomeAssistantPowerDriver(Driver):
     """Power driver backed by a Home Assistant switch entity."""
