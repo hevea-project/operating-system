@@ -40,13 +40,12 @@ echo "    boot=$BOOT_PART system0=$SYSTEM0_PART"
 mkdir -p /mnt/haos-boot /mnt/haos-system0
 mount "$BOOT_PART" /mnt/haos-boot
 
-echo "==> Copying boot files to $TFTP_DIR"
-mkdir -p "$TFTP_DIR/overlays"
-cp /mnt/haos-boot/kernel8.img "$TFTP_DIR/" 2>/dev/null || cp /mnt/haos-boot/kernel.img "$TFTP_DIR/kernel8.img"
-cp /mnt/haos-boot/*.dtb "$TFTP_DIR/" 2>/dev/null || true
-cp -r /mnt/haos-boot/overlays/* "$TFTP_DIR/overlays/" 2>/dev/null || true
-cp /mnt/haos-boot/cmdline.txt "$TFTP_DIR/"
-cp /mnt/haos-boot/config.txt "$TFTP_DIR/"
+echo "==> Copying the whole boot partition to $TFTP_DIR"
+# The Pi4 ROM netboot fetches by name from the TFTP root (serial dir first,
+# then root): start4.elf/start.elf, fixup*.dat, config.txt, cmdline.txt,
+# kernel8.img, *.dtb, overlays/... so copy everything.
+mkdir -p "$TFTP_DIR"
+cp -a /mnt/haos-boot/. "$TFTP_DIR/"
 umount /mnt/haos-boot
 
 echo "==> Copying erofs system image to $HTTP_DIR (for a diskless initramfs)"
