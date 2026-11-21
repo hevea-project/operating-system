@@ -20,16 +20,22 @@ sudo ./extract-boot-files.sh ../../../../output_rpi4/images/haos_rpi4-18.4.img
 #    les tests ou exclut la plage 192.168.1.150-200 de son pool (sinon il
 #    peut répondre au RPi sans option PXE).
 
-# 3. Démarrer le serveur
+# 3. Démarrer le serveur — /!
+#    `down` d'abord : un conteneur existant ne prend PAS les nouveaux
+#    montages (:z) ni le user: "0:0" sans être recréé.
+docker compose down
 docker compose up -d
 
 # 4. Booter le RPi4 (pas de SD, boot réseau dans l'EEPROM) et suivre :
 docker logs -f pxe-server-dnsmasq-1     # DHCPDISCOVER du RPi + requêtes TFTP
 ```
 
-> Le conteneur dnsmasq tourne en root (`user: "0:0"`) pour pouvoir lire
-> `dnsmasq.conf` même s'il est en 0600 chez toi — sinon : « cannot read
-> /etc/dnsmasq.conf: Permission denied » en boucle.
+> Le conteneur dnsmasq tourne en root (`user: "0:0"`) et les montages
+> utilisent `:z` (relabel SELinux, hôte Fedora) pour pouvoir lire
+> `dnsmasq.conf` — sinon : « cannot read /etc/dnsmasq.conf: Permission
+> denied » en boucle. `port=0` désactive le DNS de dnsmasq car le port 53
+> est déjà pris par systemd-resolved en network_mode: host — sinon :
+> « failed to create listening socket for port 53: Address in use ».
 
 ## Limitation connue : boot diskless complet de HAOS
 
