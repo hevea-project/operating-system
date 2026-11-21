@@ -17,8 +17,13 @@
 #      For direct kernel boot (RPi4 style):
 #        dhcp-match=set:pi4,option:client-arch,0,7  (or vendor class)
 #        dhcp-boot=tag:pi4,kernel8.img,cmdline.txt
-#   3. RPi4 with EEPROM configured for network boot (usbboot once to set
-#      BOOT_ORDER=0x21: SD, then network) — or just no SD inserted
+#   3. RPi4 with EEPROM recent enough for network boot (>= 2020-09-03, check
+#      with `vcgencmd bootloader_version` once booted from an SD card) and
+#      BOOT_ORDER containing 0x2 (NETWORK). BOOT_ORDER is read right-to-left
+#      (LSB nibble first): 0x1=SD, 0x2=NETWORK, 0x4=USB-MSD, 0xf=RESTART.
+#      The factory default 0xf41 = SD then USB, WITHOUT network — set e.g.
+#      BOOT_ORDER=0xf21 (SD then NET) or 0xf12 (NET first) via
+#      `sudo rpi-eeprom-config --edit` (works headless over SSH).
 #
 # Environment variables (labgrid only substitutes LG_*-prefixed variables
 # via !template, so use those names):

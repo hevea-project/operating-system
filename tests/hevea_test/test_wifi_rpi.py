@@ -3,7 +3,7 @@
 QEMU does not emulate the Broadcom WiFi chipset, so these tests are
 skipped when running under the QEMU strategy. Run them with:
 
-    RPI_IP=192.168.1.100 pytest --lg-env tests/hevea-rpi-strategy.yaml tests/hevea_test/test_wifi_rpi.py
+    LG_RPI_IP=192.168.1.100 pytest --lg-env hevea-rpi-strategy.yaml hevea_test/test_wifi_rpi.py
 """
 
 import logging

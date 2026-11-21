@@ -1,7 +1,7 @@
 """SSH connectivity tests from the host machine.
 
 On QEMU: connects to localhost:22222 (hostfwd).
-On physical RPi: connects to $RPI_IP:22222 (HAOS dropbear port).
+On physical RPi: connects to $LG_RPI_IP:22222 (HAOS dropbear port).
 
 These tests run on the host, not inside the target.
 """
