@@ -78,7 +78,7 @@ avec `BOOT_UART=1` dans la config EEPROM).
 
 | Fichier | Rôle |
 |---------|------|
-| `docker-compose.yml` | dnsmasq (DHCP+TFTP) + nginx (HTTP), network_mode: host |
+| `docker-compose.yml` | dnsmasq (DHCP+TFTP, network_mode: host) + nginx (HTTP sur le port hôte 8880) |
 | `dnsmasq.conf` | config DHCP/TFTP/PXE |
 | `extract-boot-files.sh` | extrait kernel/dtbs/cmdline/config + l'erofs system depuis le .img |
 | `tftp/` | fichiers servis en TFTP (kernel8.img, *.dtb, overlays/, cmdline.txt, config.txt) |

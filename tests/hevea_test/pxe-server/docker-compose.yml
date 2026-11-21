@@ -1,13 +1,15 @@
-# PXE boot server for RPi4 testing: DHCP + TFTP + HTTP in Docker.
+# PXE boot server for RPi4 testing: DHCP + TFTP (dnsmasq) + HTTP (nginx).
 #
 # Usage:
 #   1. Extract boot files from the HAOS RPi4 image:
 #        sudo ./extract-boot-files.sh ../../../output_rpi4/images/haos_rpi4-18.4.img
 #   2. Start the server:
-#        docker compose up -d
+#        docker compose down && docker compose up -d
 #   3. Boot the RPi4 (no SD) — it will PXE boot from this server.
 #
-# Requires network_mode: host so DHCP/TFTP broadcasts reach the RPi4.
+# Only dnsmasq uses network_mode: host (DHCP/TFTP broadcasts must reach the
+# RPi4). nginx is on the bridge with host port 8880 (host port 80 is usually
+# already taken, e.g. by the QEMU HAOS VM hostfwd).
 
 services:
   dnsmasq:
@@ -27,9 +29,14 @@ services:
     command: --no-daemon --log-queries --conf-file=/etc/dnsmasq.conf
     restart: unless-stopped
 
+  # HTTP server for the erofs rootfs (future diskless initramfs).
+  # NOT network_mode: host — port 80 is already used on the host (e.g. the
+  # QEMU HAOS VM hostfwd). Bridge + published port 8880 instead.
+  # The RPi would fetch: http://<server-ip>:8880/hassos-system0.erofs
   http:
     image: nginx:alpine
-    network_mode: host
+    ports:
+      - "8880:80"
     volumes:
       - ./http:/usr/share/nginx/html:ro,z
     restart: unless-stopped
