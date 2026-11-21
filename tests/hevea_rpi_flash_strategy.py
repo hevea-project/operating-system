@@ -36,8 +36,7 @@ class RPiFlashStrategy(Strategy):
 
     bindings = {
         "power": "HomeAssistantPowerDriver",
-        "ssh": "SSHDriver",
-        "shell": "CustomTimeoutShellDriver",
+        "shell": "CustomTimeoutSSHDriver",
     }
 
     image_path = attr.ib(default="../output_rpi4/images/haos_rpi4-18.4.img")
@@ -85,7 +84,6 @@ class RPiFlashStrategy(Strategy):
             self.power.on()
             # Wait for SSH to come up
             time.sleep(30)
-            self.target.activate(self.ssh)
             self.target.activate(self.shell)
 
         self.status = status

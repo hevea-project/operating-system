@@ -3,28 +3,32 @@
 # Prerequisites:
 #   - Flash the HAOS RPi4 image to an SD card manually
 #   - Boot the RPi and ensure it has a fixed IP (configure your DHCP)
-#   - Set the RPI_IP environment variable or edit the address below
+#   - Export LG_RPI_IP with that address (labgrid only substitutes
+#     LG_*-prefixed variables via !template)
 #   - The test SSH key must be in the RPi's authorized_keys
 #     (inject via usb.img like for QEMU, or add manually)
 #
 # Usage:
-#   RPI_IP=192.168.1.100 pytest --lg-env tests/hevea-rpi-strategy.yaml tests/hevea_test/
+#   LG_RPI_IP=192.168.1.100 pytest --lg-env hevea-rpi-strategy.yaml hevea_test/
 
 imports:
-  - qemu_shell_strategy.py
+  - custom_timeout_ssh_driver.py
   - hevea_rpi_strategy.py
 
 targets:
   rpi4:
     resources:
       - NetworkService:
-          address: ${RPI_IP}
+          address: !template ${LG_RPI_IP}
           username: root
+          port: 22222
 
     drivers:
-      - SSHDriver:
-          key: ./tests/hevea_test/test_ssh_key
-          connection_timeout: 60
-      - CustomTimeoutShellDriver:
+      # HAOS exposes dropbear on port 22222 (not 22). SSHDriver is used
+      # directly as the shell: on a physical target there is no console,
+      # and ShellDriver requires a ConsoleProtocol.
+      - CustomTimeoutSSHDriver:
+          keyfile: ./hevea_test/test_ssh_key
+          connection_timeout: 60.0
           command_timeout: 300
       - RPiShellStrategy: {}

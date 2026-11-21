@@ -43,13 +43,16 @@ L'image QCOW2 doit exister à `output_ova/images/haos_ova-18.4.qcow2`
 
 4. Lancer les tests :
    ```bash
-   RPI_IP=192.168.1.100 pytest --lg-env hevea-rpi-strategy.yaml hevea_test/ -v
+   LG_RPI_IP=192.168.1.100 pytest --lg-env hevea-rpi-strategy.yaml hevea_test/ -v
    ```
+
+> Note : labgrid ne substitue que les variables d'environnement préfixées
+> `LG_` (via `!template` dans le YAML). Utiliser `LG_RPI_IP`, pas `RPI_IP`.
 
 ## Lancer uniquement les tests WiFi (RPi physique uniquement)
 
 ```bash
-RPI_IP=192.168.1.100 pytest --lg-env hevea-rpi-strategy.yaml hevea_test/test_wifi_rpi.py -v
+LG_RPI_IP=192.168.1.100 pytest --lg-env hevea-rpi-strategy.yaml hevea_test/test_wifi_rpi.py -v
 ```
 
 ## Structure des tests
@@ -76,9 +79,10 @@ Lancement :
 ```bash
 cd tests
 source venv/bin/activate
-export HA_TOKEN=<long-lived token HA>
-export RPI_SWITCH=switch.prise_rpi4
-export RPI_IP=192.168.1.100
+export LG_HA_URL=http://homeassistant.local:8123
+export LG_HA_TOKEN=<long-lived token HA>
+export LG_RPI_SWITCH=switch.prise_rpi4
+export LG_RPI_IP=192.168.1.100
 pytest --lg-env hevea-rpi-pxe-strategy.yaml hevea_test/ -v
 ```
 

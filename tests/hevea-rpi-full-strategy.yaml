@@ -7,14 +7,15 @@
 #   sudo apt install usbboot   # or build from github.com/raspberrypi/usbboot
 #   RPi4 connected to host via USB-C (power + data), NO SD card inserted
 #
-# Environment variables:
-#   HA_URL       Home Assistant URL (default http://localhost:8123)
-#   HA_TOKEN     Long-lived access token from HA
-#   RPI_SWITCH   HA switch entity for the RPi power (default switch.rpi4)
-#   RPI_IP       IP of the RPi once booted (DHCP, fixed via your router)
+# Environment variables (labgrid only substitutes LG_*-prefixed variables
+# via !template, so use those names):
+#   LG_RPI_IP       IP of the RPi once booted (DHCP, fixed via your router)
+#   LG_HA_URL       Home Assistant URL (e.g. http://homeassistant.local:8123)
+#   LG_HA_TOKEN     Home Assistant long-lived access token
+#   LG_RPI_SWITCH   HA switch entity for the RPi power (e.g. switch.eve_energy)
 
 imports:
-  - qemu_shell_strategy.py
+  - custom_timeout_ssh_driver.py
   - hevea_rpi_power_driver.py
   - hevea_rpi_flash_strategy.py
 
@@ -22,18 +23,21 @@ targets:
   rpi4:
     resources:
       - NetworkService:
-          address: ${RPI_IP}
+          address: !template ${LG_RPI_IP}
           username: root
+          port: 22222
 
     drivers:
       - HomeAssistantPowerDriver:
-          ha_url: ${HA_URL:-http://localhost:8123}
-          ha_token: ${HA_TOKEN}
-          entity: ${RPI_SWITCH:-switch.rpi4}
-      - SSHDriver:
-          key: ./hevea_test/test_ssh_key
-          connection_timeout: 60
-      - CustomTimeoutShellDriver:
+          ha_url: !template ${LG_HA_URL}
+          ha_token: !template ${LG_HA_TOKEN}
+          entity: !template ${LG_RPI_SWITCH}
+      # HAOS exposes dropbear on port 22222 (not 22). SSHDriver is used
+      # directly as the shell: on a physical target there is no console,
+      # and ShellDriver requires a ConsoleProtocol.
+      - CustomTimeoutSSHDriver:
+          keyfile: ./hevea_test/test_ssh_key
+          connection_timeout: 60.0
           command_timeout: 300
       - RPiFlashStrategy:
           image_path: ../output_rpi4/images/haos_rpi4-18.4.img

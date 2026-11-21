@@ -8,7 +8,6 @@ import enum
 
 import attr
 
-from labgrid.driver import SSHDriver
 from labgrid.strategy import Strategy, StrategyError
 from labgrid.target import target_factory
 from labgrid.step import step
@@ -26,8 +25,7 @@ class RPiShellStrategy(Strategy):
     """Strategy for an already-booted physical RPi: connect via SSH and shell."""
 
     bindings = {
-        "ssh": "SSHDriver",
-        "shell": "CustomTimeoutShellDriver",
+        "shell": "CustomTimeoutSSHDriver",
     }
 
     status = attr.ib(default=Status.unknown)
@@ -42,10 +40,8 @@ class RPiShellStrategy(Strategy):
             step.skip("nothing to do")
             return
         elif status == Status.off:
-            self.target.deactivate(self.ssh)
             self.target.deactivate(self.shell)
         elif status == Status.shell:
-            self.target.activate(self.ssh)
             self.target.activate(self.shell)
         else:
             raise StrategyError(f"no transition found from {self.status} to {status}")

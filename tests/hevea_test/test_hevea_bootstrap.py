@@ -131,12 +131,23 @@ def test_gateway_service_ran(shell):
     _wait_for(check_bootstrap_done, timeout=300, description="hevea-gateway bootstrap complete")
 
 
+def _ha_json_ok(shell_json, cmd, timeout=240):
+    """Run a `ha ... --raw-json` command, retrying until the Supervisor API
+    answers with result == ok (it can be briefly unavailable after boot)."""
+    def check():
+        try:
+            out = shell_json(cmd)
+        except Exception:
+            return None
+        return out if out.get("result") == "ok" else None
+    return _wait_for(check, timeout=timeout, description=f"{cmd} result=ok")
+
+
 @pytest.mark.dependency(depends=["test_gateway_service_ran"])
 @pytest.mark.timeout(300)
 def test_hevea_repo_added(shell_json):
     """The Hevea add-on repository was added to the Supervisor store."""
-    repos = shell_json("ha store --raw-json")
-    assert repos.get("result") == "ok", f"ha store failed: {repos}"
+    repos = _ha_json_ok(shell_json, "ha store --raw-json")
 
     repo_slugs = [
         r.get("slug")
@@ -152,8 +163,7 @@ def test_hevea_repo_added(shell_json):
 @pytest.mark.dependency(depends=["test_hevea_repo_added"])
 def test_hevea_addons_installed(shell_json):
     """All three Hevea add-ons are installed in the Supervisor."""
-    apps = shell_json("ha apps --raw-json")
-    assert apps.get("result") == "ok", f"ha apps failed: {apps}"
+    apps = _ha_json_ok(shell_json, "ha apps --raw-json")
 
     installed_slugs = [
         a.get("slug")
@@ -191,7 +201,12 @@ def test_gateway_addon_running(shell_json):
     """The Hevea Gateway add-on is running (state=started)."""
 
     def check_gateway_state():
-        apps = shell_json("ha apps --raw-json")
+        try:
+            apps = shell_json("ha apps --raw-json")
+        except Exception:
+            return None
+        if apps.get("result") != "ok":
+            return None
         addons = apps.get("data", {}).get("addons", [])
         gateway = next(
             (a for a in addons if a.get("slug", "").endswith("_hassio-gateway") or a.get("slug") == "hassio-gateway"),

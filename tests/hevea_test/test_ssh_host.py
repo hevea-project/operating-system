@@ -1,7 +1,7 @@
 """SSH connectivity tests from the host machine.
 
 On QEMU: connects to localhost:22222 (hostfwd).
-On physical RPi: connects to $RPI_IP:22.
+On physical RPi: connects to $RPI_IP:22222 (HAOS dropbear port).
 
 These tests run on the host, not inside the target.
 """
@@ -21,9 +21,9 @@ def _get_ssh_target(strategy) -> tuple[str, int]:
     driver_names = [type(d).__name__ for d in strategy.target.drivers]
     if "QEMUDriver" in driver_names:
         return "127.0.0.1", 22222
-    # Physical RPi: use the NetworkService address
-    rpi_ip = os.environ.get("RPI_IP", "192.168.1.100")
-    return rpi_ip, 22
+    # Physical RPi running HAOS: dropbear listens on 22222 (same as QEMU image)
+    rpi_ip = os.environ.get("LG_RPI_IP") or os.environ.get("RPI_IP", "192.168.1.100")
+    return rpi_ip, 22222
 
 
 def test_ssh_from_host(strategy):

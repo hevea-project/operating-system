@@ -30,8 +30,7 @@ class RPiPXEStrategy(Strategy):
 
     bindings = {
         "power": "HomeAssistantPowerDriver",
-        "ssh": "SSHDriver",
-        "shell": "CustomTimeoutShellDriver",
+        "shell": "CustomTimeoutSSHDriver",
     }
 
     status = attr.ib(default=Status.unknown)
@@ -59,7 +58,6 @@ class RPiPXEStrategy(Strategy):
             self.power.on()
             self.logger.info("Waiting for RPi4 to PXE boot and SSH to come up...")
             time.sleep(60)  # PXE boot takes longer than SD
-            self.target.activate(self.ssh)
             self.target.activate(self.shell)
 
         self.status = status

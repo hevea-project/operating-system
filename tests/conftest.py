@@ -2,11 +2,22 @@ import json
 import logging
 import os
 
-from labgrid.driver import ShellDriver
+from labgrid.driver import ShellDriver, SSHDriver
+from labgrid.exceptions import NoDriverFoundError
 import pytest
 
 
 logger = logging.getLogger(__name__)
+
+
+def _get_shell(target, strategy):
+    """Return the shell driver: ShellDriver on QEMU (console), SSHDriver on
+    physical targets (no console available)."""
+    strategy.transition("shell")
+    try:
+        return target.get_driver(ShellDriver, activate=False)
+    except NoDriverFoundError:
+        return target.get_driver(SSHDriver, activate=False)
 
 
 def _has_qemu(strategy) -> bool:
@@ -54,18 +65,15 @@ def pytest_runtest_setup(item):
 
 
 @pytest.fixture
-def shell(target, strategy) -> ShellDriver:
-    """Fixture for accessing shell."""
-    strategy.transition("shell")
-    shell = target.get_driver("ShellDriver")
-    return shell
+def shell(target, strategy):
+    """Fixture for accessing shell (ShellDriver on QEMU, SSHDriver on RPi)."""
+    return _get_shell(target, strategy)
 
 
 @pytest.fixture
 def shell_json(target, strategy) -> callable:
     """Fixture for running CLI commands returning JSON string as output."""
-    strategy.transition("shell")
-    shell = target.get_driver("ShellDriver")
+    shell = _get_shell(target, strategy)
 
     def get_json_response(command, *, timeout=None) -> dict:
         return json.loads("\n".join(shell.run_check(command, timeout=timeout)))

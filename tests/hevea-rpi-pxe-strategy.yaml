@@ -20,14 +20,15 @@
 #   3. RPi4 with EEPROM configured for network boot (usbboot once to set
 #      BOOT_ORDER=0x21: SD, then network) — or just no SD inserted
 #
-# Environment variables:
-#   HA_URL       Home Assistant URL (default http://localhost:8123)
-#   HA_TOKEN     Long-lived access token
-#   RPI_SWITCH   HA switch entity for the RPi power (default switch.rpi4)
-#   RPI_IP       IP assigned to the RPi by DHCP (fixed via MAC reservation)
+# Environment variables (labgrid only substitutes LG_*-prefixed variables
+# via !template, so use those names):
+#   LG_RPI_IP       IP assigned to the RPi by DHCP (fixed via MAC reservation)
+#   LG_HA_URL       Home Assistant URL (e.g. http://homeassistant.local:8123)
+#   LG_HA_TOKEN     Home Assistant long-lived access token
+#   LG_RPI_SWITCH   HA switch entity for the RPi power (e.g. switch.eve_energy)
 
 imports:
-  - qemu_shell_strategy.py
+  - custom_timeout_ssh_driver.py
   - hevea_rpi_power_driver.py
   - hevea_rpi_pxe_strategy.py
 
@@ -35,17 +36,20 @@ targets:
   rpi4:
     resources:
       - NetworkService:
-          address: ${RPI_IP}
+          address: !template ${LG_RPI_IP}
           username: root
+          port: 22222
 
     drivers:
       - HomeAssistantPowerDriver:
-          ha_url: ${HA_URL:-http://localhost:8123}
-          ha_token: ${HA_TOKEN}
-          entity: ${RPI_SWITCH:-switch.rpi4}
-      - SSHDriver:
-          key: ./hevea_test/test_ssh_key
-          connection_timeout: 60
-      - CustomTimeoutShellDriver:
+          ha_url: !template ${LG_HA_URL}
+          ha_token: !template ${LG_HA_TOKEN}
+          entity: !template ${LG_RPI_SWITCH}
+      # HAOS exposes dropbear on port 22222 (not 22). SSHDriver is used
+      # directly as the shell: on a physical target there is no console,
+      # and ShellDriver requires a ConsoleProtocol.
+      - CustomTimeoutSSHDriver:
+          keyfile: ./hevea_test/test_ssh_key
+          connection_timeout: 60.0
           command_timeout: 300
       - RPiPXEStrategy: {}
