@@ -13,12 +13,17 @@ services:
   dnsmasq:
     image: andyshinn/dnsmasq:latest
     network_mode: host
+    # run as root: the image otherwise drops to a non-root user that cannot
+    # read a 0600 dnsmasq.conf owned by your user ("Permission denied")
+    user: "0:0"
     cap_add:
       - NET_ADMIN
       - NET_RAW
     volumes:
-      - ./dnsmasq.conf:/etc/dnsmasq.conf:ro
-      - ./tftp:/tftpboot:ro
+      # :z = SELinux relabel (Fedora enforcing) — without it dnsmasq gets
+      # "cannot read /etc/dnsmasq.conf: Permission denied"
+      - ./dnsmasq.conf:/etc/dnsmasq.conf:ro,z
+      - ./tftp:/tftpboot:ro,z
     command: --no-daemon --log-queries --conf-file=/etc/dnsmasq.conf
     restart: unless-stopped
 
@@ -26,5 +31,5 @@ services:
     image: nginx:alpine
     network_mode: host
     volumes:
-      - ./http:/usr/share/nginx/html:ro
+      - ./http:/usr/share/nginx/html:ro,z
     restart: unless-stopped

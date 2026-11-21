@@ -11,13 +11,36 @@ cd tests/hevea_test/pxe-server
 # 1. Extraire les fichiers boot depuis l'image RPi4 (nécessite sudo pour losetup)
 sudo ./extract-boot-files.sh ../../../../output_rpi4/images/haos_rpi4-18.4.img
 
-# 2. Éditer dnsmasq.conf : remplacer l'interface et la plage DHCP par ton LAN
+# 2. Éditer dnsmasq.conf :
+#      - interface=... -> TA vraie interface LAN (ip addr ; ex. wlp3s0 en WiFi)
+#      - dhcp-range=... -> une plage de TON sous-réseau, sans l'IP du routeur
+#        ni celle de ton PC (ici 192.168.1.100)
+#      - dhcp-host=... -> réserve l'IP du RPi (MAC dc:a6:32:14:63:44)
+#    Astuce : si ton routeur fait aussi serveur DHCP, désactive-le pendant
+#    les tests ou exclut la plage 192.168.1.150-200 de son pool (sinon il
+#    peut répondre au RPi sans option PXE).
 
 # 3. Démarrer le serveur
 docker compose up -d
 
-# 4. Booter le RPi4 (pas de SD insérée, ou EEPROM en boot réseau)
+# 4. Booter le RPi4 (pas de SD, boot réseau dans l'EEPROM) et suivre :
+docker logs -f pxe-server-dnsmasq-1     # DHCPDISCOVER du RPi + requêtes TFTP
 ```
+
+> Le conteneur dnsmasq tourne en root (`user: "0:0"`) pour pouvoir lire
+> `dnsmasq.conf` même s'il est en 0600 chez toi — sinon : « cannot read
+> /etc/dnsmasq.conf: Permission denied » en boucle.
+
+## Limitation connue : boot diskless complet de HAOS
+
+Le `cmdline.txt` stock de HAOS monte la racine avec
+`root=PARTUUID=... rootfstype=erofs` : il attend la carte SD. Le kernel ne
+peut pas monter un erofs/ext4 servi en HTTP, donc un boot 100% diskless
+nécessite un **initramfs custom** qui télécharge `hassos-system0.erofs`
+(servi dans `http/`) et le monte en loop. En attendant, ce serveur PXE
+sert à valider le boot réseau (DHCP → TFTP → kernel) ; pour la suite de
+tests complète sur RPi4, utiliser le boot SD + prise HA (on/off) :
+`hevea-rpi-strategy.yaml`.
 
 ## Prérequis côté RPi4 (vérification headless, sans écran)
 
@@ -51,9 +74,9 @@ avec `BOOT_UART=1` dans la config EEPROM).
 |---------|------|
 | `docker-compose.yml` | dnsmasq (DHCP+TFTP) + nginx (HTTP), network_mode: host |
 | `dnsmasq.conf` | config DHCP/TFTP/PXE |
-| `extract-boot-files.sh` | extrait kernel/dtbs/cmdline/rootfs depuis le .img |
-| `tftp/` | fichiers servis en TFTP (kernel8.img, *.dtb, cmdline.txt, config.txt) |
-| `http/` | rootfs servie en HTTP (référencée par cmdline.txt) |
+| `extract-boot-files.sh` | extrait kernel/dtbs/cmdline/config + l'erofs system depuis le .img |
+| `tftp/` | fichiers servis en TFTP (kernel8.img, *.dtb, overlays/, cmdline.txt, config.txt) |
+| `http/` | `hassos-system0.erofs` servi en HTTP (pour un futur initramfs diskless) |
 
 ## Lancer les tests PXE
 

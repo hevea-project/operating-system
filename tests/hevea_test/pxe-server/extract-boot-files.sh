@@ -5,11 +5,16 @@
 #   sudo ./extract-boot-files.sh /path/to/haos_rpi4-18.4.img
 #
 # Output:
-#   tftp/  — kernel, dtbs, cmdline.txt, config.txt (served via TFTP)
-#   http/  — rootfs (served via HTTP, referenced from cmdline.txt)
+#   tftp/  — kernel8.img, *.dtb, overlays/, config.txt, cmdline.txt (TFTP)
+#   http/  — hassos-system0.erofs + hassos-kernel0 (HTTP, for an initramfs
+#            that loop-mounts the erofs rootfs over the network)
 #
-# The RPi4 boot ROM loads kernel8.img + dtbs + cmdline.txt via TFTP,
-# then the kernel mounts the rootfs from the HTTP URL in cmdline.txt.
+# NOTE: the stock HAOS cmdline.txt boots with root=PARTUUID=... rootfstype=erofs,
+# i.e. it expects the SD card. A full diskless boot therefore needs a custom
+# initramfs that downloads the erofs image over HTTP and loop-mounts it.
+# Until then, use the PXE server to smoke-test network boot (DHCP/TFTP/kernel
+# load) and use SD boot + HA power switch (hevea-rpi-strategy.yaml) for the
+# full test suite.
 
 set -eu
 
@@ -20,36 +25,43 @@ HTTP_DIR="$SCRIPT_DIR/http"
 
 echo "==> Mounting $IMG"
 LOOPDEV=$(losetup --show -f -P "$IMG")
-trap 'losetup -d "$LOOPDEV" 2>/dev/null || true; umount /mnt/boot /mnt/root 2>/dev/null || true' EXIT
+cleanup() {
+    losetup -d "$LOOPDEV" 2>/dev/null || true
+    umount /mnt/haos-boot /mnt/haos-system0 2>/dev/null || true
+}
+trap cleanup EXIT
 
-# RPi4 images: p1 = boot (FAT), p2 = rootfs (ext4)
-mkdir -p /mnt/boot /mnt/root
-mount "${LOOPDEV}p1" /mnt/boot
-mount "${LOOPDEV}p2" /mnt/root
+# Find partitions by PARTLABEL instead of assuming fixed numbers
+BOOT_PART=$(lsblk -n -o NAME,PARTLABEL "$LOOPDEV" | awk '$2=="hassos-boot"{print "/dev/"$1}')
+SYSTEM0_PART=$(lsblk -n -o NAME,PARTLABEL "$LOOPDEV" | awk '$2=="hassos-system0"{print "/dev/"$1}')
+echo "    boot=$BOOT_PART system0=$SYSTEM0_PART"
+[ -n "$BOOT_PART" ] || { echo "hassos-boot partition not found"; exit 1; }
+
+mkdir -p /mnt/haos-boot /mnt/haos-system0
+mount "$BOOT_PART" /mnt/haos-boot
 
 echo "==> Copying boot files to $TFTP_DIR"
 mkdir -p "$TFTP_DIR/overlays"
-cp /mnt/boot/kernel8.img "$TFTP_DIR/" 2>/dev/null || cp /mnt/boot/kernel.img "$TFTP_DIR/kernel8.img"
-cp /mnt/boot/*.dtb "$TFTP_DIR/" 2>/dev/null || true
-cp -r /mnt/boot/overlays/* "$TFTP_DIR/overlays/" 2>/dev/null || true
-cp /mnt/boot/cmdline.txt "$TFTP_DIR/"
-cp /mnt/boot/config.txt "$TFTP_DIR/"
+cp /mnt/haos-boot/kernel8.img "$TFTP_DIR/" 2>/dev/null || cp /mnt/haos-boot/kernel.img "$TFTP_DIR/kernel8.img"
+cp /mnt/haos-boot/*.dtb "$TFTP_DIR/" 2>/dev/null || true
+cp -r /mnt/haos-boot/overlays/* "$TFTP_DIR/overlays/" 2>/dev/null || true
+cp /mnt/haos-boot/cmdline.txt "$TFTP_DIR/"
+cp /mnt/haos-boot/config.txt "$TFTP_DIR/"
+umount /mnt/haos-boot
 
-echo "==> Copying rootfs to $HTTP_DIR"
-mkdir -p "$HTTP_DIR/rootfs"
-# Copy the rootfs (can be large — use rsync for incremental updates)
-rsync -a --delete /mnt/root/ "$HTTP_DIR/rootfs/" 2>/dev/null || cp -a /mnt/root/. "$HTTP_DIR/rootfs/"
+echo "==> Copying erofs system image to $HTTP_DIR (for a diskless initramfs)"
+mkdir -p "$HTTP_DIR"
+if [ -n "$SYSTEM0_PART" ]; then
+    dd if="$SYSTEM0_PART" of="$HTTP_DIR/hassos-system0.erofs" bs=4M status=none
+else
+    echo "    hassos-system0 not found, skipping"
+fi
 
-echo "==> Patching cmdline.txt to point rootfs at HTTP"
-SERVER_IP=$(ip -4 addr show scope global | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
-echo "    Detected server IP: $SERVER_IP"
-sed -i "s|root=[^ ]*|root=http://$SERVER_IP/rootfs rootfstype=ext4 rootwait|" "$TFTP_DIR/cmdline.txt"
-# Also add the server IP for NFS if needed
-sed -i "s|\$SERVER_IP|$SERVER_IP|g" "$TFTP_DIR/cmdline.txt" 2>/dev/null || true
-
-umount /mnt/boot /mnt/root
-losetup -d "$LOOPDEV"
+cleanup
 trap - EXIT
 
-echo "==> Done. Boot files in $TFTP_DIR, rootfs in $HTTP_DIR"
+echo "==> Done. Boot files in $TFTP_DIR, erofs in $HTTP_DIR"
 echo "    Start the PXE server: cd $SCRIPT_DIR && docker compose up -d"
+echo "    NOTE: stock cmdline.txt still points at root=PARTUUID (SD card)."
+echo "    Full diskless HAOS boot needs an initramfs that fetches"
+echo "    http://<server>/hassos-system0.erofs and loop-mounts it."
