@@ -1,0 +1,30 @@
+# PXE boot server for RPi4 testing: DHCP + TFTP + HTTP in Docker.
+#
+# Usage:
+#   1. Extract boot files from the HAOS RPi4 image:
+#        sudo ./extract-boot-files.sh ../../../output_rpi4/images/haos_rpi4-18.4.img
+#   2. Start the server:
+#        docker compose up -d
+#   3. Boot the RPi4 (no SD) — it will PXE boot from this server.
+#
+# Requires network_mode: host so DHCP/TFTP broadcasts reach the RPi4.
+
+services:
+  dnsmasq:
+    image: andyshinn/dnsmasq:latest
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./dnsmasq.conf:/etc/dnsmasq.conf:ro
+      - ./tftp:/tftpboot:ro
+    command: --no-daemon --log-queries --conf-file=/etc/dnsmasq.conf
+    restart: unless-stopped
+
+  http:
+    image: nginx:alpine
+    network_mode: host
+    volumes:
+      - ./http:/usr/share/nginx/html:ro
+    restart: unless-stopped
