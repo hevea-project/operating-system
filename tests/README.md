@@ -64,22 +64,31 @@ Prérequis hôte :
    (ex. `switch.eve_energy`), plus un long-lived access token HA
    (fichier local `hevea_test/token`, **non commité**).
 
-Lancement :
+Lancement (adapter les IP à votre réseau — **ne pas copier-coller aveuglément**,
+l'IP filaire du PC change si le dongle/DHCP change) :
 
 ```bash
 cd tests
 source venv/bin/activate
-export LG_RPI_IP=192.168.1.150          # IP fixe du RPi (réservation DHCP)
-export LG_HA_URL=http://raspberrypi4   # HA sur le réseau du RPi
+# IP filaire actuelle du PC (interface enp6s0*, dongle USB) :
+PC_IP=$(ip -4 -o addr show | awk '/enp6s0/ {print $4}' | cut -d/ -f1 | head -1)
+export LG_RPI_IP=192.168.1.150            # IP fixe du RPi (réservation DHCP MAC)
+export LG_HA_URL=http://raspberrypi4     # HA sur le réseau du RPi
 export LG_HA_TOKEN=$(cat hevea_test/token)
-export LG_RPI_SWITCH=switch.eve_energy  # prise Matter de l'alim du RPi
+export LG_RPI_SWITCH=switch.eve_energy    # prise Matter de l'alim du RPi
 # Commissionnement e2e : la stack docker-compose du repo hevea (dossier docker/)
 # doit tourner sur le PC hôte, et le RPi doit pouvoir l'atteindre :
-export HEVEA_APP_URL=http://192.168.1.37:7030        # app, vue du PC
-export HEVEA_GATEWAY_VM_URL=http://192.168.1.150:9000 # portail gateway du RPi
-export HEVEA_VM_APP_ADDR=http://192.168.1.37:7030    # app_addr injecté dans l'addon
+export HEVEA_APP_URL=http://$PC_IP:7030         # app, vue du PC
+export HEVEA_GATEWAY_VM_URL=http://$LG_RPI_IP:9000 # portail gateway du RPi
+export HEVEA_VM_APP_ADDR=http://$PC_IP:7030    # app_addr injecté dans l'addon
 pytest --lg-env hevea-rpi-pxe-strategy.yaml hevea_test/ -v --timeout=900
 ```
+
+> **Piège classique** : si l'IP filaire du PC a changé depuis le démarrage du
+> conteneur `dnsmasq`, le `cmdline.txt` servi au RPi contient l'ancienne IP du
+> serveur NBD et le boot échoue (SSH jamais up). Dans ce cas :
+> `cd hevea_test/pxe-server && docker compose restart dnsmasq`
+> (l'entrypoint régénère `tftp/cmdline.txt` avec l'IP détectée courante).
 
 La stratégie : power off via la prise HA → power on → boot PXE → attente SSH
 (port 22222) → tests. Résultat constaté : **18/18 tests passent** (boot, SSH,

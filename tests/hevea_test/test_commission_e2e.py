@@ -81,7 +81,21 @@ def app_token_and_site():
                 )
                 if r2.status_code == 200 and r2.json():
                     return token, r2.json()[0]["id"]
-                last_err = f"sites: {r2.status_code} {r2.text}"
+                if r2.status_code == 200:
+                    # Fresh stack: no site yet — create one so the
+                    # commissioning has a site to bind to.
+                    r3 = requests.post(
+                        f"{APP_URL}/api/v1/sites",
+                        headers={"Authorization": f"Bearer {token}"},
+                        json={"name": "hevea-labgrid-test"},
+                        timeout=10,
+                    )
+                    if r3.status_code in (200, 201) and r3.json().get("id"):
+                        _LOGGER.info("Created test site %s", r3.json()["id"])
+                        return token, r3.json()["id"]
+                    last_err = f"site create: {r3.status_code} {r3.text}"
+                else:
+                    last_err = f"sites: {r2.status_code} {r2.text}"
             else:
                 last_err = f"login: {r.status_code} {r.text}"
         except requests.RequestException as e:
