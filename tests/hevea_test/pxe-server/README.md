@@ -4,7 +4,7 @@ Sert les fichiers boot de l'image HAOS RPi4 via DHCP + TFTP, et exporte
 **le disque entier** de l'image via NBD (qemu-nbd, TCP 10809). Le RPi4
 boot sans SD avec l'image comme périphérique bloc racine : toutes les
 partitions existent, donc **les mises à jour RAUC A/B fonctionnent**
-(les écritures repartent dans `nbd/haos_rpi4.img` sur le PC).
+(les écritures repartent dans `nbd/hevea_rpi4.img` sur le PC).
 
 ## Topologie validée (testée et fonctionnelle)
 
@@ -51,7 +51,7 @@ cd tests/hevea_test/pxe-server
 
 # 1. Extraire les fichiers boot depuis l'image RPi4 (sudo pour losetup)
 #    -> tftp/ = partition boot + cmdline.txt diskless, nbd/ = copie de l'image
-sudo ./extract-boot-files.sh ../../../output_rpi4_64/images/haos_rpi4-18.4.img
+sudo ./extract-boot-files.sh ../../../output_rpi4_64/images/hevea_rpi4-64-18.4.1.img
 
 # 2. Construire l'initramfs diskless (build rpi4_64 terminé requis) :
 #    busybox + nbd.ko + nbd-connect (cross-compilé) + /init -> tftp/initrd.gz
@@ -115,7 +115,7 @@ Debug headless : logs dnsmasq (`log-dhcp` + `log-queries`) et/ou UART
 |---------|------|
 | `docker-compose.yml` | dnsmasq (DHCP+TFTP, host, `user: "0:0"`, `:z`) + nbd (qemu-nbd :10809, host) + nginx (HTTP, port hôte 8880) |
 | `dnsmasq.conf` | DHCP (range, réservation MAC, `dhcp-option=66`) + TFTP ; `port=0` car 53 est pris par systemd-resolved |
-| `extract-boot-files.sh` | copie la partition `hassos-boot` -> `tftp/` (+ cmdline.txt diskless + initramfs dans config.txt), image -> `nbd/haos_rpi4.img`, `hassos-system0` -> `http/` |
+| `extract-boot-files.sh` | copie la partition `hassos-boot` -> `tftp/` (+ cmdline.txt diskless + initramfs dans config.txt), image -> `nbd/hevea_rpi4.img`, `hassos-system0` -> `http/` |
 | `make-initramfs.sh` | assemble `tftp/initrd.gz` depuis le build rpi4_64 (busybox, `nbd.ko`, `nbd-connect` cross-compilé, `/init`) |
 | `nbd-connect.c` | client NBD minimal (handshake newstyle + `NBD_SET_SOCK`/`NBD_DO_IT`) pour l'initramfs |
 | `tftp/` | partition boot complète servie en TFTP + `initrd.gz` |

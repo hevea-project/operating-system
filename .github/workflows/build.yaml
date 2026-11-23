@@ -381,7 +381,7 @@ jobs:
       - name: Compute image digests
         if: ${{ github.event_name == 'release' || needs.prepare.outputs.publish_build == 'true' }}
         working-directory: output/images/
-        run: sha256sum haos_* > SHA256SUMS.${{ matrix.board.id }}
+        run: sha256sum hevea_* > SHA256SUMS.${{ matrix.board.id }}
 
       - name: Upload image digests artifact
         if: ${{ github.event_name == 'release' || needs.prepare.outputs.publish_build == 'true' }}
@@ -401,7 +401,7 @@ jobs:
             ./ \
             s3://${{ secrets.R2_OS_ARTIFACTS_BUCKET }}/${{ needs.prepare.outputs.version_full }}/ \
             --exclude "*" \
-            --include "haos_*" \
+            --include "hevea_*" \
             --endpoint-url ${{ secrets.R2_OS_ARTIFACTS_ENDPOINT }}
 
       - name: Upload release assets
@@ -409,7 +409,7 @@ jobs:
         uses: shogo82148/actions-upload-release-asset@9ee13965a8a51926f330b424693f25fcff8f2ef6 # v1.10.6
         with:
           upload_url: ${{ github.event.release.upload_url }}
-          asset_path: output/images/haos_*
+          asset_path: output/images/hevea_*
 
       - name: Print cache stats
         run: |
@@ -446,7 +446,7 @@ jobs:
           echo "## Artifacts" >> $GITHUB_STEP_SUMMARY
           echo "| File | Size (bytes) | Size (formatted) |" >> $GITHUB_STEP_SUMMARY
           echo "|:-|:-|:-|" >> $GITHUB_STEP_SUMMARY
-          for f in output/images/haos_*; do
+          for f in output/images/hevea_*; do
             echo "| $(basename $f) | $(du -b $f | cut -f1) | $(du -bh $f | cut -f1) |" >> $GITHUB_STEP_SUMMARY
           done
           echo "## Partitions" >> $GITHUB_STEP_SUMMARY

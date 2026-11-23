@@ -40,4 +40,4 @@ targets:
           connection_timeout: 60.0
           command_timeout: 300
       - RPiFlashStrategy:
-          image_path: ../output_rpi4/images/haos_rpi4-18.4.img
+          image_path: ../output_rpi4_64/images/hevea_rpi4-64-18.4.1.img

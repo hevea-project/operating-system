@@ -25,7 +25,7 @@ sudo ./hevea_test/make_usb_img.sh
 pytest --lg-env hevea-strategy.yaml hevea_test/ -v
 ```
 
-L'image QCOW2 doit exister à `output_ova/images/haos_ova-18.4.qcow2`
+L'image QCOW2 doit exister à `output_ova/images/hevea_ova-18.4.1.qcow2`
 (relatif au dossier `tests/`).
 
 ## Lancer les tests sur Raspberry Pi 4 (physique)
@@ -33,7 +33,7 @@ L'image QCOW2 doit exister à `output_ova/images/haos_ova-18.4.qcow2`
 1. Flasher l'image RPi4 sur une carte SD :
    ```bash
    # Adapter le chemin de l'image
-   sudo dd if=output_rpi4/images/haos_rpi4-18.4.img of=/dev/sdX bs=4M status=progress
+   sudo dd if=output_rpi4_64/images/hevea_rpi4-64-18.4.1.img of=/dev/sdX bs=4M status=progress
    ```
 
 2. Créer un `usb.img` avec la clé SSH de test et le monter sur le RPi

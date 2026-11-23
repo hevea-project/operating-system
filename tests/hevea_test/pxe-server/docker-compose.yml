@@ -8,7 +8,7 @@
 #
 # Usage:
 #   1. Extract boot files + image copy from the HAOS RPi4 image:
-#        sudo ./extract-boot-files.sh ../../../output_rpi4_64/images/haos_rpi4-18.4.img
+#        sudo ./extract-boot-files.sh ../../../output_rpi4_64/images/hevea_rpi4-64-18.4.1.img
 #   2. Build the diskless initramfs (needs a finished rpi4_64 build):
 #        ./make-initramfs.sh ../../../output_rpi4_64
 #   3. Start the server:
@@ -45,7 +45,7 @@ services:
   # NBD server: exports the whole HAOS rpi4 disk image as a block device.
   # The RPi4 initramfs attaches it as /dev/nbd0 and boots the erofs system
   # partition from it — fully diskless, RAUC A/B slots work (writes go back
-  # to nbd/haos_rpi4.img). network_mode: host so it can bind the LAN IP.
+  # to nbd/hevea_rpi4.img). network_mode: host so it can bind the LAN IP.
   nbd:
     image: fedora:44
     network_mode: host
@@ -56,7 +56,7 @@ services:
     # on stale connections left by RPi power-cycles).
     command: >
       sh -c "dnf install -y -q nbdkit nbdkit-basic-plugins
-      && exec nbdkit -f -v -p 10809 -i 0.0.0.0 file /export/haos_rpi4.img"
+      && exec nbdkit -f -v -p 10809 -i 0.0.0.0 file /export/hevea_rpi4.img"
     restart: unless-stopped
 
   # HTTP server for the erofs rootfs (debug/reference only).

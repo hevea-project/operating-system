@@ -9,7 +9,7 @@ Deux cibles :
 
 | Cible | Stratégie | Comment |
 |-------|-----------|---------|
-| QEMU x86_64 (émulation) | `hevea-strategy.yaml` | image `output_ova/images/haos_ova-*.qcow2` + `usb.img` (clé SSH) |
+| QEMU x86_64 (émulation) | `hevea-strategy.yaml` | image `output_ova/images/hevea_ova-*.qcow2` + `usb.img` (clé SSH) |
 | Raspberry Pi 4 physique, **diskless (PXE + NBD)** | `hevea-rpi-pxe-strategy.yaml` | serveur PXE sur le PC hôte + prise Matter HA pour l'alim |
 
 ## Setup
@@ -25,7 +25,7 @@ Clé SSH de test (déjà commitée, usage tests uniquement) : `hevea_test/test_s
 
 ## QEMU (x86_64)
 
-Prérequis : build OVA terminé (`output_ova/images/haos_ova-18.4.qcow2`) et
+Prérequis : build OVA terminé (`output_ova/images/hevea_ova-18.4.1.qcow2`) et
 `hevea_test/usb.img` généré (contient la clé publique de test) :
 
 ```bash
@@ -56,7 +56,7 @@ Prérequis hôte :
 3. Le serveur PXE tourne (voir `hevea_test/pxe-server/README.md`) :
    ```bash
    cd hevea_test/pxe-server
-   ./extract-boot-files.sh ../../../output_rpi4_64/images/haos_rpi4-64-18.4.img
+   ./extract-boot-files.sh ../../../output_rpi4_64/images/hevea_rpi4-64-18.4.1.img
    ./make-initramfs.sh ../../../output_rpi4_64 <IP_PC>
    docker compose down && docker compose up -d
    ```

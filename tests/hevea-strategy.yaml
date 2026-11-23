@@ -30,7 +30,7 @@ tools:
   qemu-system-x86_64: /usr/bin/qemu-system-x86_64
 
 images:
-  haos-image: ../output_ova/images/haos_ova-18.4.qcow2
+  haos-image: ../output_ova/images/hevea_ova-18.4.1.qcow2
   bios: /usr/share/edk2/ovmf/OVMF_CODE.fd
 
 

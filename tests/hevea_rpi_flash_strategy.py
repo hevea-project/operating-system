@@ -8,7 +8,7 @@ Orchestration:
 
 Requires on the host:
   - usbboot (github.com/raspberrypi/usbboot): rpiboot binary in PATH
-  - the HAOS RPi4 image at ../output_rpi4/images/haos_rpi4-18.4.img
+  - the HAOS RPi4 image at ../output_rpi4_64/images/hevea_rpi4-64-18.4.1.img
 """
 
 import enum
@@ -39,7 +39,7 @@ class RPiFlashStrategy(Strategy):
         "shell": "CustomTimeoutSSHDriver",
     }
 
-    image_path = attr.ib(default="../output_rpi4/images/haos_rpi4-18.4.img")
+    image_path = attr.ib(default="../output_rpi4_64/images/hevea_rpi4-64-18.4.1.img")
     status = attr.ib(default=Status.unknown)
 
     def _flash(self):

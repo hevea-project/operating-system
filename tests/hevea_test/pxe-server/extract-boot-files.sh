@@ -2,7 +2,7 @@
 # Extracts PXE/NBD boot files from a HAOS RPi4 disk image (.img or .img.xz).
 #
 # Usage:
-#   ./extract-boot-files.sh /path/to/haos_rpi4-64-18.4.img[.xz]
+#   ./extract-boot-files.sh /path/to/hevea_rpi4-64-18.4.1.img[.xz]
 #
 # Output:
 #   tftp/  — boot partition contents (start4.elf, *.dtb, overlays/, Image,
@@ -26,7 +26,7 @@
 
 set -eu
 
-IMG="${1:?usage: $0 <haos_rpi4.img[.xz]>}"
+IMG="${1:?usage: $0 <hevea_rpi4.img[.xz]>}"
 case "$IMG" in
     *.xz) [ -f "${IMG%.xz}" ] || unxz -k "$IMG"; IMG="${IMG%.xz}" ;;
 esac
@@ -93,8 +93,8 @@ fi
 
 echo "==> Reflink copy of the disk image for the NBD export -> $NBD_DIR"
 mkdir -p "$NBD_DIR"
-cp --reflink=auto "$IMG" "$NBD_DIR/haos_rpi4.img"
-chmod a+r "$NBD_DIR/haos_rpi4.img"
+cp --reflink=auto "$IMG" "$NBD_DIR/hevea_rpi4.img"
+chmod a+r "$NBD_DIR/hevea_rpi4.img"
 
 echo "==> Done. Boot files in $TFTP_DIR, image copy in $NBD_DIR, erofs in $HTTP_DIR"
 echo "    Build the initramfs: ./make-initramfs.sh ../../../output_rpi4_64"

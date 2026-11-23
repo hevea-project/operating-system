@@ -99,3 +99,16 @@ Tests are primarily written in Python using `pytest`.
   - NOT a bare word like `hevea1` (`18.4.hevea1` is invalid semver and breaks version comparison in the Supervisor).
 - Hevea add-ons and services use their own independent semver (e.g. `1.2.3` in `config.yaml`).
 - The version is consumed by `scripts/generate-version-json.sh` (update server) and `buildroot-external/scripts/name.sh` (image names).
+
+## Identity (name and ID)
+- `HAOS_NAME` / `HAOS_ID` in `buildroot-external/meta` define the OS identity: `/etc/os-release`
+  (`NAME`, `ID`, `PRETTY_NAME`, `VARIANT`), image/bundle names (`<HAOS_ID>_<board>-<version>.*`),
+  the OTA URL on the update server (`{version}/<HAOS_ID>_<board>-<version>.raucb`), and the
+  **RAUC `compatible` string** (`<HAOS_ID>-<board>`, via `haos_rauc_compatible` in `name.sh`).
+- The Supervisor's `version.json` key stays `hassos` regardless of `HAOS_ID`
+  (`generate-version-json.sh` hardcodes it) — the Supervisor binary reads `.hassos[board]`.
+- ⚠️ Changing `HAOS_ID` changes the RAUC `compatible` string: bundles built with the new ID
+  are **rejected** by devices still running an image with the old ID. Only rename before
+  devices are deployed, or migrate the running systems' `/etc/rauc/system.conf` first.
+- Internal unit/file names (`haos-*.service`, `hassos-*` partition labels) are unchanged
+  on purpose: they are not part of the OS identity.
