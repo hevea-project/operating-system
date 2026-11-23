@@ -65,11 +65,47 @@ echo "Registry:           ${REGISTRY}"
 echo "Arches:             ${ARCHES}"
 echo "Push:               ${PUSH}"
 
+# ---------------------------------------------------------------------------
+# Pick a buildx builder that can actually run the RUN steps of non-native
+# platforms. The default "docker" driver executes build steps on the host
+# kernel, so a linux/arm64 build on an x86_64 host needs a qemu binfmt_misc
+# handler. The docker-container driver ships its own qemu, so prefer it when
+# the default builder cannot handle a requested platform (this mirrors what
+# docker/setup-buildx-action does in .github/workflows/build-supervisor.yml).
+# ---------------------------------------------------------------------------
+BUILDER="default"
+case "$(uname -m)" in
+    x86_64)  native_platform="linux/amd64" ;;
+    aarch64) native_platform="linux/arm64" ;;
+    *)       native_platform="linux/$(uname -m)" ;;
+esac
+need_container_builder=false
+IFS=',' read -ra ARCH_ARRAY <<< "$ARCHES"
+for arch in "${ARCH_ARRAY[@]}"; do
+    case "$arch" in
+        aarch64) platform="linux/arm64" ;;
+        *)       platform="linux/${arch}" ;;
+    esac
+    if [ "$platform" != "$native_platform" ] \
+       && ! docker buildx inspect "$BUILDER" --bootstrap 2>/dev/null | grep -q "$platform"; then
+        need_container_builder=true
+    fi
+done
+if [ "$need_container_builder" = true ]; then
+    if docker buildx inspect hevea-supervisor >/dev/null 2>&1; then
+        BUILDER="hevea-supervisor"
+    else
+        docker buildx create --name hevea-supervisor --driver docker-container
+        docker buildx inspect hevea-supervisor --bootstrap
+        BUILDER="hevea-supervisor"
+    fi
+    echo "Using buildx builder '${BUILDER}' (docker-container driver, provides qemu emulation)"
+fi
+
 if [ "$DRY_RUN" = false ] && [ "$PUSH" = true ]; then
     if [ -n "${GITHUB_TOKEN:-}" ]; then
         echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${GITHUB_USER:-hevea-project}" --password-stdin
     fi
-    docker buildx inspect default >/dev/null 2>&1 || docker buildx create --use --name hevea-supervisor
 fi
 
 IFS=',' read -ra ARCH_ARRAY <<< "$ARCHES"
@@ -80,7 +116,7 @@ for arch in "${ARCH_ARRAY[@]}"; do
     esac
 
     image="${REGISTRY}/${arch}-hassio-supervisor"
-    cmd="docker buildx build --platform '${platform}' \
+    cmd="docker buildx build --builder '${BUILDER}' --platform '${platform}' \
         --build-arg ARCH='${arch}' --build-arg VERSION='${VERSION}' \
         --file '${HAOS_ROOT}/docker/supervisor/Dockerfile' \
         --tag '${image}:${VERSION}' --tag '${image}:latest' \
