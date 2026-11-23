@@ -230,21 +230,32 @@ def test_ha_api_reachable(shell):
     """Home Assistant API is reachable on port 80 (and redirect on 8123)."""
 
     def check_ha_api():
-        output = shell.run_check("curl -s -o /dev/null -w '%{http_code}' http://localhost/api/onboarding 2>/dev/null || echo 000")
+        # /api/ answers 401 ("API running.") without credentials; 200 with
+        # them. Any HTTP answer means the API is up. (200/404 on
+        # /api/onboarding would also work but 404 once onboarded.)
+        output = shell.run_check("curl -s -o /dev/null -w '%{http_code}' http://localhost/api/ 2>/dev/null || echo 000")
         code = "\n".join(output).strip()
         _LOGGER.info("HA API status: %s", code)
-        return code == "200"
+        return code in ("200", "401")
 
     _wait_for(check_ha_api, timeout=300, description="HA API on port 80")
 
-    # Port 8123 should redirect to port 80
+    # Port 8123 redirects to the API port only until onboarding completes
+    # (HA >= 2026.9 serves on port 80 and tears the legacy redirect down once
+    # onboarded). Accept either the redirect or a closed port after onboarding.
     redirect = shell.run_check(
         "curl -s -o /dev/null -w '%{http_code} %{redirect_url}' http://localhost:8123 || true"
     )
-    _LOGGER.info("Port 8123 redirect: %s", redirect)
-    assert "307" in "\n".join(redirect) or "302" in "\n".join(redirect) or "301" in "\n".join(redirect), (
-        f"Port 8123 does not redirect: {redirect}"
+    onboarded = shell.run_check(
+        "curl -s http://localhost/api/onboarding 2>/dev/null | grep -q '\"done\": *true' && echo yes || echo no"
     )
+    _LOGGER.info("Port 8123 redirect: %s (onboarded: %s)", redirect, onboarded)
+    if "yes" in "\n".join(onboarded):
+        assert True  # onboarded: legacy redirect is expected to be gone
+    else:
+        assert "307" in "\n".join(redirect) or "302" in "\n".join(redirect) or "301" in "\n".join(redirect), (
+            f"Port 8123 does not redirect: {redirect}"
+        )
 
 
 @pytest.mark.dependency(depends=["test_boot_and_system_ready"])

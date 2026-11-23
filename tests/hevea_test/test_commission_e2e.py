@@ -158,6 +158,61 @@ def test_commission_via_vm_gateway(shell, shell_json, app_token_and_site):
     )
     time.sleep(5)
 
+    # Reset the Home Assistant onboarding so the commissioning can run again
+    # on a reused (already commissioned) image: without this the gateway
+    # refuses with 409 HA_ALREADY_ONBOARDED. Stop HA Core first: it re-saves
+    # .storage/auth on shutdown, which would resurrect the existing user.
+    def _ha_api_code():
+        # NB: use shell.run, not run_check: when the connection is refused
+        # curl exits non-zero and run_check would raise, hiding the "000".
+        # curl -w '%{http_code}' prints 000 by itself on failure.
+        out = shell.run(
+            "curl -s -o /dev/null -w '%{http_code}' -m 5 http://localhost/api/ 2>/dev/null"
+        )
+        lines = out[0] if isinstance(out, tuple) else out
+        return "\n".join(lines).strip() if lines else "000"
+
+    def _ha_running():
+        return _ha_api_code() in ("200", "401")  # 401 = "API running." without credentials
+
+    # ha core stop is refused while HA is still starting or the Supervisor is
+    # busy (e.g. right after the gateway add-on restart above): wait for HA
+    # to be up, then retry the stop until the API is down.
+    _wait_for(_ha_running, timeout=180, description="HA Core up before onboarding reset")
+
+    def _stop_ha():
+        code = _ha_api_code()
+        if code == "000":
+            return True
+        out = shell.run("ha core stop --no-progress 2>&1 || true")
+        _LOGGER.info("ha core stop (api=%s): %s", code, str(out)[:200])
+        return False
+
+    _wait_for(_stop_ha, timeout=180, description="HA Core stopped", interval=5)
+    # HA Core is stopped at this point, so docker exec would fail: remove the
+    # files from the host side (the HA config dir is mounted under /mnt/data).
+    shell.run_check(
+        "rm -rf /mnt/data/supervisor/homeassistant/.storage/onboarding "
+        "/mnt/data/supervisor/homeassistant/.storage/auth "
+        "/mnt/data/supervisor/homeassistant/.storage/auth_provider.homeassistant "
+        "/mnt/data/supervisor/homeassistant/.storage/person"
+    )
+    def _start_ha():
+        if _ha_running():
+            return True
+        shell.run("ha core start --no-progress 2>&1 || true")
+        return False
+
+    _wait_for(_start_ha, timeout=180, description="HA Core restarted after onboarding reset", interval=5)
+
+    def _onboarding_reset():
+        out = shell.run_check(
+            "curl -s -m 5 http://localhost/api/onboarding 2>/dev/null | grep -q '\"step\":\"user\",\"done\":false' && echo yes || echo no"
+        )
+        return "yes" in "\n".join(out)
+
+    _wait_for(_onboarding_reset, timeout=60, description="HA onboarding user step reset")
+
     # Commission via the VM's gateway (host port 19000 -> VM port 9000)
     r = requests.post(
         f"{GATEWAY_VM_URL}/api/v1/commission",
@@ -229,9 +284,9 @@ def test_ha_login_with_hevea_credentials(shell):
     def check_ha_login():
         # Create a login flow
         out = shell.run_check(
-            'curl -s -X POST http://localhost/api/auth/login_flow '
+            'curl -s -X POST http://localhost/auth/login_flow '
             '-H "Content-Type: application/json" '
-            f'-d \'{{"client_id":"http://localhost/","handler":["homeassistant",null],"redirect_uri":"http://localhost/auth/external/callback"}}\' '
+            f'-d \'{{"client_id":"http://localhost/","handler":["command_line",null],"redirect_uri":"http://localhost/auth/external/callback"}}\' '
             '2>/dev/null || true'
         )
         text = "\n".join(out)
@@ -242,7 +297,7 @@ def test_ha_login_with_hevea_credentials(shell):
                 return False
             # Submit credentials
             out2 = shell.run_check(
-                f'curl -s -X POST http://localhost/api/auth/login_flow/{flow_id} '
+                f'curl -s -X POST http://localhost/auth/login_flow/{flow_id} '
                 '-H "Content-Type: application/json" '
                 f'-d \'{{"client_id":"http://localhost/","username":"{ADMIN_EMAIL}","password":"{ADMIN_PASSWORD}"}}\' '
                 '2>/dev/null || true'
@@ -257,9 +312,18 @@ def test_ha_login_with_hevea_credentials(shell):
     # configuration.yaml) is installed by the gateway through the
     # homeassistant_config:rw map. If the add-on was pre-installed in the image
     # before the map was added to the repository, the shim is missing: skip.
-    shim = shell.run("test -f /config/hevea-auth.py && echo OK || echo MISSING")
+    shim = shell.run("docker exec homeassistant test -f /config/hevea-auth.py && echo OK || echo MISSING")
     if "MISSING" in str(shim):
         pytest.skip("hevea-auth.py shim not installed (gateway add-on needs "
                     "homeassistant_config:rw map — rebuild the OS image or "
                     "reinstall the gateway add-on from the updated repository)")
+    # HA unpacks the provider's args with *config[CONF_ARGS] and crashes when
+    # the key is absent: the gateway add-on image must include the args fix.
+    args = shell.run(
+        "docker exec homeassistant sh -c \"grep -A3 'type: command_line' /config/configuration.yaml | grep -q 'args:' && echo OK || echo MISSING\""
+    )
+    if "MISSING" in str(args):
+        pytest.skip("command_line provider lacks args (gateway add-on image "
+                    "predates the args fix — redeploy the add-on from the "
+                    "updated repository)")
     _wait_for(check_ha_login, timeout=180, description="HA login with Hevea credentials")

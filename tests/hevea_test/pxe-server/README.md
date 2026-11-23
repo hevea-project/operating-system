@@ -1,7 +1,10 @@
-# PXE boot server for RPi4 (Docker)
+# PXE + NBD boot server for RPi4 (Docker) — fully diskless
 
-Sert les fichiers boot de l'image HAOS RPi4 via DHCP + TFTP + HTTP, pour
-booter un RPi4 sans SD (diskless).
+Sert les fichiers boot de l'image HAOS RPi4 via DHCP + TFTP, et exporte
+**le disque entier** de l'image via NBD (qemu-nbd, TCP 10809). Le RPi4
+boot sans SD avec l'image comme périphérique bloc racine : toutes les
+partitions existent, donc **les mises à jour RAUC A/B fonctionnent**
+(les écritures repartent dans `nbd/haos_rpi4.img` sur le PC).
 
 ## Topologie validée (testée et fonctionnelle)
 
@@ -29,9 +32,11 @@ booter un RPi4 sans SD (diskless).
 # Sinon le RPi ARP pour l'IP de l'option 66 sans réponse -> pas de TFTP.
 sudo sysctl -w net.ipv4.conf.enp6s0f4u1.rp_filter=0
 
-# firewalld : autoriser DHCP(67)/TFTP(69) en entrée sur l'interface filaire
+# firewalld : autoriser DHCP(67)/TFTP(69) + NBD(10809/tcp) en entrée sur
+# l'interface filaire
 sudo firewall-cmd --permanent --zone=trusted --add-interface=enp6s0f4u1
-# (ou --zone=<zone de l'iface> --add-port=67/udp --add-port=69/udp)
+sudo firewall-cmd --permanent --zone=trusted --add-port=10809/tcp
+# (ou --zone=<zone de l'iface> --add-port=67/udp --add-port=69/udp --add-port=10809/tcp)
 sudo firewall-cmd --reload
 # sinon les DISCOVER du RPi sont vus par tcpdump mais jamais livrés
 # aux sockets (vérifié avec des compteurs nft).
@@ -45,22 +50,29 @@ Sans ça : `dnsmasq` démarre mais ne voit jamais les requêtes du RPi.
 cd tests/hevea_test/pxe-server
 
 # 1. Extraire les fichiers boot depuis l'image RPi4 (sudo pour losetup)
-#    -> tftp/ = partition boot complète, http/ = hassos-system0.erofs
-sudo ./extract-boot-files.sh ../../../../output_rpi4/images/haos_rpi4-18.4.img
+#    -> tftp/ = partition boot + cmdline.txt diskless, nbd/ = copie de l'image
+sudo ./extract-boot-files.sh ../../../output_rpi4_64/images/haos_rpi4-18.4.img
 
-# 2. Adapter dnsmasq.conf :
+# 2. Construire l'initramfs diskless (build rpi4_64 terminé requis) :
+#    busybox + nbd.ko + nbd-connect (cross-compilé) + /init -> tftp/initrd.gz
+./make-initramfs.sh ../../../output_rpi4_64 192.168.1.101
+
+# 3. Adapter dnsmasq.conf :
 #      interface=...      -> interface filaire du PC (ip addr)
 #      dhcp-option=66,... -> IP filaire du PC (192.168.1.101)
 #      dhcp-host=...      -> réservation MAC du RPi -> 192.168.1.150
 
-# 3. Démarrer (down d'abord : un conteneur existant ne reprend pas les
+# 4. Démarrer (down d'abord : un conteneur existant ne reprend pas les
 #    nouveaux montages :z / user: "0:0")
 docker compose down && docker compose up -d
+# services : dnsmasq (DHCP+TFTP), nbd (qemu-nbd :10809), http (nginx :8880)
 
-# 4. Power-cycle le RPi (prise HA) et suivre :
+# 5. Power-cycle le RPi (prise HA) et suivre :
 docker logs -f pxe-server-dnsmasq-1
 # on doit voir : DHCPDISCOVER -> DHCPOFFER 192.168.1.150 (option 66)
-#               -> DHCPREQUEST -> DHCPACK -> requêtes TFTP
+#               -> DHCPREQUEST -> DHCPACK -> requêtes TFTP (start4.elf,
+#               config.txt, cmdline.txt, Image, initrd.gz, dtb, overlays)
+# puis du trafic TCP 10809 (NBD) quand l'initramfs se connecte.
 ```
 
 ## Point clé : option 66, pas 67
@@ -101,21 +113,41 @@ Debug headless : logs dnsmasq (`log-dhcp` + `log-queries`) et/ou UART
 
 | Fichier | Rôle |
 |---------|------|
-| `docker-compose.yml` | dnsmasq (DHCP+TFTP, network_mode: host, `user: "0:0"`, mounts `:z`) + nginx (HTTP, port hôte 8880) |
+| `docker-compose.yml` | dnsmasq (DHCP+TFTP, host, `user: "0:0"`, `:z`) + nbd (qemu-nbd :10809, host) + nginx (HTTP, port hôte 8880) |
 | `dnsmasq.conf` | DHCP (range, réservation MAC, `dhcp-option=66`) + TFTP ; `port=0` car 53 est pris par systemd-resolved |
-| `extract-boot-files.sh` | copie la partition `hassos-boot` -> `tftp/`, `hassos-system0` -> `http/hassos-system0.erofs` |
-| `tftp/` | partition boot complète servie en TFTP |
-| `http/` | `hassos-system0.erofs` servi en HTTP (port 8880) pour un futur initramfs diskless |
+| `extract-boot-files.sh` | copie la partition `hassos-boot` -> `tftp/` (+ cmdline.txt diskless + initramfs dans config.txt), image -> `nbd/haos_rpi4.img`, `hassos-system0` -> `http/` |
+| `make-initramfs.sh` | assemble `tftp/initrd.gz` depuis le build rpi4_64 (busybox, `nbd.ko`, `nbd-connect` cross-compilé, `/init`) |
+| `nbd-connect.c` | client NBD minimal (handshake newstyle + `NBD_SET_SOCK`/`NBD_DO_IT`) pour l'initramfs |
+| `tftp/` | partition boot complète servie en TFTP + `initrd.gz` |
+| `nbd/` | copie (reflink) de l'image disque exportée en NBD |
+| `http/` | `hassos-system0.erofs` servi en HTTP (debug uniquement) |
 
-## Limitation connue : boot diskless complet de HAOS
+## Comment boot le diskless complet
 
-Le `cmdline.txt` stock monte la racine avec `root=PARTUUID=... rootfstype=erofs`
-: il attend la carte SD. Le kernel ne peut pas monter un erofs servi en
-HTTP ; un boot 100% diskless nécessite un **initramfs custom** qui
-télécharge `http://192.168.1.101:8880/hassos-system0.erofs` et le monte en
-loop. En attendant, ce serveur PXE valide le boot réseau (DHCP -> TFTP ->
-kernel) ; pour la suite de tests complète sur RPi4, utiliser le boot SD +
-prise HA (on/off) : `hevea-rpi-strategy.yaml` avec `LG_RPI_IP=192.168.1.150`.
+Le kernel HAOS rpi4 a tout en built-in sauf NBD : `CONFIG_BCMGENET=y`
+(NIC), `CONFIG_IP_PNP_DHCP=y` (DHCP kernel via `ip=dhcp`),
+`CONFIG_MSDOS_PARTITION=y` (les partitions du disque NBD sont vues,
+`root=PARTUUID=...` marche), `CONFIG_EROFS_FS=y`, et
+`CONFIG_BLK_DEV_NBD=m` (fourni dans l'initramfs).
+
+Chaîne de boot :
+```
+ROM Pi4 --DHCP(option 66)--> dnsmasq --TFTP--> start4.elf, config.txt,
+  cmdline.txt, Image, initrd.gz, dtb, overlays
+kernel (ip=dhcp) -> /init de l'initramfs :
+  insmod nbd.ko -> nbd-connect 192.168.1.101:10809 /dev/nbd0
+  -> mount erofs /dev/nbd0pX -> switch_root /sbin/init
+HAOS complet, racine sur le disque NBD (RAUC OK)
+```
+
+`extract-boot-files.sh` pose automatiquement dans `tftp/` :
+- `config.txt` : ajout de `kernel=Image` + `initramfs initrd.gz followkernel`
+  (original conservé dans `config.txt.haos`)
+- `cmdline.txt` : `ip=dhcp root=/dev/nbd0p3 rootfstype=erofs ro rootwait ...`
+
+Perf : via un dongle USB-Ethernet 100 Mb/s, compter quelques minutes de
+boot (erofs compressé, seuls les blocs lus traversent le réseau). Un seul
+RPi à la fois sur l'image (sinon corruption).
 
 ## Lancer les tests PXE
 

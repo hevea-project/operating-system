@@ -22,8 +22,11 @@ def _get_shell(target, strategy):
 
 def _has_qemu(strategy) -> bool:
     """Whether the current target uses the QEMU driver (vs physical hardware)."""
+    drivers = strategy.target.drivers
+    if isinstance(drivers, dict):
+        drivers = drivers.values()
     return hasattr(strategy, "qemu") or any(
-        type(d).__name__ == "QEMUDriver" for d in strategy.target.drivers.values()
+        type(d).__name__ == "QEMUDriver" for d in drivers
     )
 
 

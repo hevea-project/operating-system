@@ -16,8 +16,11 @@ _LOGGER = logging.getLogger(__name__)
 
 def _is_qemu(strategy) -> bool:
     """Detect whether we are running under QEMU (no real WiFi chipset)."""
+    drivers = strategy.target.drivers
+    if isinstance(drivers, dict):
+        drivers = drivers.values()
     return hasattr(strategy, "qemu") or any(
-        type(d).__name__ == "QEMUDriver" for d in strategy.target.drivers
+        type(d).__name__ == "QEMUDriver" for d in drivers
     )
 
 
@@ -34,10 +37,15 @@ def test_wifi_interface_present(shell):
 
 
 def test_wifi_chip_detected(shell):
-    """The Broadcom WiFi chip is detected (SDIO)."""
-    output = shell.run_check("dmesg | grep -iE 'brcm|broadcom|wifi' | tail -5 || true")
-    _LOGGER.info("WiFi dmesg: %s", "\n".join(output))
-    assert output, "No WiFi chip detected in dmesg"
+    """The Broadcom WiFi chip is detected (SDIO, brcmfmac driver)."""
+    # dmesg may have rotated past the probe messages; the bound driver is
+    # the reliable indicator.
+    output = shell.run_check(
+        "readlink /sys/class/net/wlan0/device/driver 2>/dev/null || true"
+    )
+    driver = output[0].rsplit("/", 1)[-1] if output else ""
+    _LOGGER.info("wlan0 driver: %s", driver)
+    assert "brcm" in driver.lower(), f"wlan0 driver is not Broadcom: {driver!r}"
 
 
 def test_networkmanager_sees_wifi(shell):

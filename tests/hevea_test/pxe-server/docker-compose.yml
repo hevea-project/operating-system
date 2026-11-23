@@ -1,15 +1,23 @@
-# PXE boot server for RPi4 testing: DHCP + TFTP (dnsmasq) + HTTP (nginx).
+# PXE + NBD boot server for RPi4 diskless testing:
+#   - dnsmasq: DHCP + TFTP (host netns, broadcasts must reach the RPi4)
+#   - nbd:     qemu-nbd exporting the whole HAOS disk image over NBD (TCP
+#              10809, host netns) so the RPi4 can boot with the image as its
+#              root block device — no SD card, RAUC updates included
+#   - http:    nginx serving the erofs image (debug/reference only), bridge
+#              port 8880 (host port 80 is usually already taken)
 #
 # Usage:
-#   1. Extract boot files from the HAOS RPi4 image:
-#        sudo ./extract-boot-files.sh ../../../output_rpi4/images/haos_rpi4-18.4.img
-#   2. Start the server:
+#   1. Extract boot files + image copy from the HAOS RPi4 image:
+#        sudo ./extract-boot-files.sh ../../../output_rpi4_64/images/haos_rpi4-18.4.img
+#   2. Build the diskless initramfs (needs a finished rpi4_64 build):
+#        ./make-initramfs.sh ../../../output_rpi4_64
+#   3. Start the server:
 #        docker compose down && docker compose up -d
-#   3. Boot the RPi4 (no SD) — it will PXE boot from this server.
+#   4. Boot the RPi4 (no SD) — it netboots and mounts the NBD disk as root.
 #
-# Only dnsmasq uses network_mode: host (DHCP/TFTP broadcasts must reach the
-# RPi4). nginx is on the bridge with host port 8880 (host port 80 is usually
-# already taken, e.g. by the QEMU HAOS VM hostfwd).
+# firewalld: udp 67/69 (DHCP/TFTP) AND tcp 10809 (NBD) must be allowed on the
+# wired interface (e.g. `firewall-cmd --zone=trusted --add-port=10809/tcp`
+# plus --add-service=dhcp --add-service=tftp, then --runtime-to-permanent).
 
 services:
   dnsmasq:
@@ -21,15 +29,37 @@ services:
     cap_add:
       - NET_ADMIN
       - NET_RAW
+    environment:
+      # wired interface of the PC (USB dongle, name may change: enp6s0*)
+      - PXE_IFACE=${PXE_IFACE:-enp6s0*}
+      # - PXE_IP=${PXE_IP:-}   # uncomment to override auto-detection
     volumes:
       # :z = SELinux relabel (Fedora enforcing) — without it dnsmasq gets
       # "cannot read /etc/dnsmasq.conf: Permission denied"
       - ./dnsmasq.conf:/etc/dnsmasq.conf:ro,z
-      - ./tftp:/tftpboot:ro,z
-    command: --no-daemon --log-queries --conf-file=/etc/dnsmasq.conf
+      - ./entrypoint.sh:/entrypoint.sh:ro,z
+      - ./tftp:/tftpboot:rw,z
+    entrypoint: ["/entrypoint.sh"]
     restart: unless-stopped
 
-  # HTTP server for the erofs rootfs (future diskless initramfs).
+  # NBD server: exports the whole HAOS rpi4 disk image as a block device.
+  # The RPi4 initramfs attaches it as /dev/nbd0 and boots the erofs system
+  # partition from it — fully diskless, RAUC A/B slots work (writes go back
+  # to nbd/haos_rpi4.img). network_mode: host so it can bind the LAN IP.
+  nbd:
+    image: fedora:44
+    network_mode: host
+    volumes:
+      - ./nbd:/export:rw,z
+    # nbdkit file plugin: multi-threaded NBD server, handles multiple
+    # concurrent connections (qemu-nbd is single-connection and gets stuck
+    # on stale connections left by RPi power-cycles).
+    command: >
+      sh -c "dnf install -y -q nbdkit nbdkit-basic-plugins
+      && exec nbdkit -f -v -p 10809 -i 0.0.0.0 file /export/haos_rpi4.img"
+    restart: unless-stopped
+
+  # HTTP server for the erofs rootfs (debug/reference only).
   # NOT network_mode: host — port 80 is already used on the host (e.g. the
   # QEMU HAOS VM hostfwd). Bridge + published port 8880 instead.
   # The RPi would fetch: http://<server-ip>:8880/hassos-system0.erofs

@@ -16,7 +16,7 @@ imports:
   - hevea_rpi_strategy.py
 
 targets:
-  rpi4:
+  main:
     resources:
       - NetworkService:
           address: !template ${LG_RPI_IP}
