@@ -7,8 +7,17 @@ set -e
 DEVICE_CHILD="$(findfs LABEL="hassos-data")"
 DEVICE_CHILD_NAME="$(basename "${DEVICE_CHILD}")"
 DEVICE_ROOT_NAME="$(lsblk -no pkname "${DEVICE_CHILD}")"
+if [ -z "${DEVICE_ROOT_NAME}" ] && [ -e "/sys/class/block/${DEVICE_CHILD_NAME}/loop/backing_file" ]; then
+    # loop device (diskless boot, e.g. NBD root): the root disk is the backing file
+    DEVICE_ROOT_NAME="$(basename "$(cat "/sys/class/block/${DEVICE_CHILD_NAME}/loop/backing_file")")"
+fi
 DEVICE_ROOT="/dev/${DEVICE_ROOT_NAME}"
-PART_NUM="$(cat "/sys/class/block/${DEVICE_CHILD_NAME}/partition")"
+if [ -e "/sys/class/block/${DEVICE_CHILD_NAME}/partition" ]; then
+    PART_NUM="$(cat "/sys/class/block/${DEVICE_CHILD_NAME}/partition")"
+else
+    # loop device: no partition number; start/end come from the loop offset
+    PART_NUM=""
+fi
 
 # Get partition label type
 PART_TABLE="$(sfdisk -lqJ "${DEVICE_ROOT}")"
@@ -36,8 +45,15 @@ fi
 echo "[INFO] Last usable logical block ${LAST_USABLE_LBA}"
 
 # Calculate end of data partition
-JQ_FILTER=".partitiontable.partitions[] | select ( .node == \"${DEVICE_CHILD}\" ) | .start + .size"
-DATA_PARTITION_END="$(echo "${PART_TABLE}" | jq "${JQ_FILTER}")"
+if [ -n "${PART_NUM}" ]; then
+    JQ_FILTER=".partitiontable.partitions[] | select ( .node == \"${DEVICE_CHILD}\" ) | .start + .size"
+    DATA_PARTITION_END="$(echo "${PART_TABLE}" | jq "${JQ_FILTER}")"
+else
+    # loop-backed data partition (diskless boot): start/size from the loop device
+    LOOP_OFFSET="$(cat "/sys/class/block/${DEVICE_CHILD_NAME}/loop/offset")"
+    LOOP_SIZELIMIT="$(cat "/sys/class/block/${DEVICE_CHILD_NAME}/loop/sizelimit")"
+    DATA_PARTITION_END=$(( (LOOP_OFFSET + LOOP_SIZELIMIT) / 512 ))
+fi
 echo "[INFO] Data partition end block ${DATA_PARTITION_END}"
 
 # Need resize? Ignore free space if its less than 8MB/64MB (4k sectors) since
@@ -48,6 +64,10 @@ if [ "${UNUSED_BLOCKS}" -le "16384" ]; then
     exit 0
 fi
 
+if [ -z "${PART_NUM}" ]; then
+    echo "[INFO] Loop-backed data partition, cannot grow it (pre-size the disk image instead)"
+    exit 0
+fi
 echo "[INFO] Update hassos-data partition ${PART_NUM}"
 echo ", +" | sfdisk --no-reread --no-tell-kernel -N "${PART_NUM}" "${DEVICE_ROOT}"
 sfdisk -V "${DEVICE_ROOT}"
