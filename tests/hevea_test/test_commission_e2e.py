@@ -40,7 +40,7 @@ def test_commission_via_vm_gateway(shell, shell_json, app_token_and_site):
     _LOGGER.info("Commissioning site %s via target gateway", site_id)
 
     cc.wait_system_ready(shell)
-    local_app_addr = os.environ.get("HEVEA_VM_APP_ADDR", "http://10.0.2.2:7030")
+    local_app_addr = cc.resolve_app_addr(shell)
     cc.point_gateway_at_app(shell, shell_json, local_app_addr)
     cc.reset_ha_onboarding(shell)
     cc.commission(shell, token, site_id)

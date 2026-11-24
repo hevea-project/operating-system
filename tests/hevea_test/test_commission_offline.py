@@ -82,24 +82,32 @@ def _remove_offline_chain(shell):
     assert left == "0", "HEVEA_OFFLINE rules still present in OUTPUT"
 
 
-def _block_internet(shell, allow_public_iface=None, delete_default_route=True):
-    """Block public egress. Returns (gw, iface) of the removed default route."""
-    gw, iface = _default_route(shell)
+def _block_internet(shell, allow_public_iface=None):
+    """Block public egress with iptables only (no route deletion: NetworkManager
+    re-adds the ethernet default route on connection events, racing with us).
+    Public is allowed only via allow_public_iface (e.g. wlan0)."""
     _install_offline_chain(shell, allow_public_iface)
-    if delete_default_route and gw:
-        shell.run_check("ip route del default")
-    _LOGGER.info("Internet blocked (gw=%s iface=%s, public allowed via %s)",
-                 gw, iface, allow_public_iface or "nothing")
-    return gw, iface
+    _LOGGER.info("Internet blocked (public allowed via %s)", allow_public_iface or "nothing")
 
 
-def _restore_internet(shell, gw, iface):
+def _restore_internet(shell):
     _remove_offline_chain(shell)
-    if gw and iface:
-        shell.run(f"ip route add default via {gw} dev {iface} 2>/dev/null || true")
-    out = _shell_text(shell, "ip route show default | head -1").strip()
-    assert out, "default route not restored"
-    _LOGGER.info("Internet restored (default via %s dev %s)", gw, iface)
+    _LOGGER.info("Internet restored (offline chain removed)")
+
+
+def _force_default_via(shell, iface):
+    """Remove default routes that do not use `iface` (e.g. the ethernet one
+    NetworkManager keeps/re-adds), so public traffic leaves via `iface`."""
+    others = _shell_text(
+        shell, f"ip route show default | awk '{{print $5}}' | grep -v '^{iface}$' | sort -u"
+    ).split()
+    for dev in others:
+        for _ in range(3):
+            shell.run(f"ip route del default dev {dev} 2>/dev/null || true")
+    left = _shell_text(
+        shell, f"ip route show default | awk '{{print $5}}' | grep -vc '^{iface}$' || true"
+    ).strip()
+    assert left == "0", f"non-{iface} default routes remain: {left}"
 
 
 def _public_reachable(shell):
@@ -110,7 +118,9 @@ def _public_reachable(shell):
     )
 
 
-def _assert_offline(shell, gw):
+def _assert_offline(shell, gw=None):
+    if gw is None:
+        gw, _ = _default_route(shell)
     assert not _public_reachable(shell), "public egress still works (block failed?)"
     if gw:
         out = _shell_text(shell, f"ping -c 1 -W 2 {gw} >/dev/null 2>&1 && echo GW_OK || echo GW_FAIL")
@@ -146,9 +156,9 @@ def test_offline_first_boot_wifi_provisioning(shell, shell_json, app_token_and_s
 
     # Block Internet as early as possible: the add-on images are baked in the
     # image, so the gateway must come up offline from the local docker store.
-    gw, iface = _block_internet(shell, allow_public_iface=wlan)
+    _block_internet(shell, allow_public_iface=wlan)
     try:
-        _assert_offline(shell, gw)
+        _assert_offline(shell)
 
         # Supervisor + gateway add-on come up offline (baked images, no pull)
         cc.wait_system_ready(shell)
@@ -182,13 +192,16 @@ def test_offline_first_boot_wifi_provisioning(shell, shell_json, app_token_and_s
             route = _shell_text(shell, f"ip route show default | grep {wlan}")
             return bool(ip.strip()) and bool(route.strip())
         cc.wait_for(wifi_up, timeout=180, interval=5, description=f"{wlan} connected with default route")
+        # NetworkManager keeps/re-adds the ethernet default route (lower metric):
+        # remove it so public traffic leaves via the WiFi
+        _force_default_via(shell, wlan)
 
         # Internet is back, via the WiFi
         _assert_online(shell)
 
         # Commissioning now runs (online via WiFi, app on the LAN)
         token, site_id = app_token_and_site
-        local_app_addr = os.environ.get("HEVEA_VM_APP_ADDR", "http://10.0.2.2:7030")
+        local_app_addr = cc.resolve_app_addr(shell)
         cc.point_gateway_at_app(shell, shell_json, local_app_addr)
         cc.reset_ha_onboarding(shell)
         cc.commission(shell, token, site_id)
@@ -202,7 +215,7 @@ def test_offline_first_boot_wifi_provisioning(shell, shell_json, app_token_and_s
                     description="HA login with Hevea credentials")
         _LOGGER.info("Offline-boot -> WiFi provisioning -> commissioning: OK")
     finally:
-        _restore_internet(shell, gw, iface)
+        _restore_internet(shell)
 
 
 @pytest.mark.timeout(900)
@@ -218,13 +231,13 @@ def test_commission_without_internet(shell, shell_json, app_token_and_site):
     cc.wait_system_ready(shell)
     cc.wait_for(lambda: cc.find_gateway_slug(shell_json), timeout=600,
                 description="gateway add-on installed")
-    local_app_addr = os.environ.get("HEVEA_VM_APP_ADDR", "http://10.0.2.2:7030")
+    local_app_addr = cc.resolve_app_addr(shell)
     cc.point_gateway_at_app(shell, shell_json, local_app_addr)
     cc.reset_ha_onboarding(shell)
 
-    gw, iface = _block_internet(shell)  # no allow_public_iface: full block
+    _block_internet(shell)  # no allow_public_iface: full block
     try:
-        _assert_offline(shell, gw)
+        _assert_offline(shell)
 
         cc.commission(shell, token, site_id)
 
@@ -244,4 +257,4 @@ def test_commission_without_internet(shell, shell_json, app_token_and_site):
                     description="HA login with Hevea credentials (offline)")
         _LOGGER.info("Offline HA login OK: commissioning fully works without Internet")
     finally:
-        _restore_internet(shell, gw, iface)
+        _restore_internet(shell)

@@ -15,7 +15,10 @@ and the gateway portal is reached from the host at HEVEA_GATEWAY_VM_URL
 import json
 import logging
 import os
+import re
+import subprocess
 import time
+import urllib.parse
 
 import pytest
 import requests
@@ -95,6 +98,44 @@ def app_login():
                 last_err = str(e)
         time.sleep(3)
     pytest.fail(f"App not reachable at {candidates}: {last_err}")
+
+
+def resolve_app_addr(shell):
+    """Best app URL as seen from the target.
+
+    HEVEA_VM_APP_ADDR if set (normalized: scheme + :7030 added when missing)
+    and reachable from the target; otherwise auto-detected — QEMU targets
+    reach the host at 10.0.2.2 (slirp), physical targets at the pytest host's
+    source IP toward the target (ip route get <target>).
+    """
+    candidates = []
+    env_addr = os.environ.get("HEVEA_VM_APP_ADDR", "")
+    if env_addr:
+        if "://" not in env_addr:
+            env_addr = "http://" + env_addr
+        if ":" not in env_addr.split("://", 1)[1]:
+            env_addr += ":7030"
+        candidates.append(env_addr)
+    gw_host = urllib.parse.urlparse(GATEWAY_VM_URL).hostname or ""
+    if gw_host in ("localhost", "127.0.0.1"):
+        candidates.append("http://10.0.2.2:7030")
+    elif gw_host:
+        try:
+            out = subprocess.run(["ip", "route", "get", gw_host],
+                                 capture_output=True, text=True, timeout=10).stdout
+            m = re.search(r"src (\d+\.\d+\.\d+\.\d+)", out)
+            if m:
+                candidates.append(f"http://{m.group(1)}:7030")
+        except Exception:
+            pass
+    for cand in candidates:
+        out = shell.run(f"curl -s -o /dev/null -m 5 -w '%{{http_code}}' {cand}/api/ 2>/dev/null || echo 000")
+        lines = out[0] if isinstance(out, tuple) else out
+        text = "\n".join(lines)
+        if "200" in text or "401" in text:  # 401 = API running, no credentials
+            _LOGGER.info("app_addr for target: %s", cand)
+            return cand
+    pytest.fail(f"no reachable app address for the target from {candidates}")
 
 
 def wait_system_ready(shell, timeout=600):
