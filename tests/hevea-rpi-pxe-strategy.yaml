@@ -3,21 +3,13 @@
 # - power on/off via a Home Assistant switch (Matter plug)
 # - tests run over SSH once booted
 #
-# Prerequisites on the host PC:
-#   1. DHCP + TFTP + HTTP server serving the HAOS RPi4 boot files:
-#      - kernel: output_rpi4/images/boot/Image (or extracted from the .img)
-#      - initramfs: output_rpi4/images/boot/initramfs (if any)
-#      - cmdline.txt, config.txt, dtbs
-#      - rootfs: the HAOS rootfs served over NFS or HTTP (or embedded in initramfs)
-#   2. dnsmasq config example:
-#        dhcp-boot=bootcode.bin
-#        dhcp-boot=pxelinux.0  (or direct kernel boot)
-#        enable-tftp
-#        tftp-root=/srv/tftp
-#      For direct kernel boot (RPi4 style):
-#        dhcp-match=set:pi4,option:client-arch,0,7  (or vendor class)
-#        dhcp-boot=tag:pi4,kernel8.img,cmdline.txt
-#   3. RPi4 with EEPROM recent enough for network boot (>= 2020-09-03, check
+# Prerequisites:
+#   1. A PXE+NBD server on a WIRED host on the RPi4's L2 segment (see
+#      hevea_test/pxe-server/README.md) — e.g. "groszordi" via SSH; deploy an
+#      image + start it with: PXE_SSH_HOST=groszordi ./deploy-rpi4-image.sh
+#      (the test PC itself may be on WiFi: only DHCP/TFTP broadcasts need the
+#      wired segment, unicast traffic is routed).
+#   2. RPi4 with EEPROM recent enough for network boot (>= 2020-09-03, check
 #      with `vcgencmd bootloader_version` once booted from an SD card) and
 #      BOOT_ORDER containing 0x2 (NETWORK). BOOT_ORDER is read right-to-left
 #      (LSB nibble first): 0x1=SD, 0x2=NETWORK, 0x4=USB-MSD, 0xf=RESTART.

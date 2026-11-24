@@ -7,9 +7,11 @@
 # Output:
 #   tftp/  — boot partition contents (start4.elf, *.dtb, overlays/, Image,
 #            config.txt, cmdline.txt) + diskless overrides + initrd.gz target
-#   nbd/   — reflink copy of the raw disk image, exported over NBD
-#            (qemu-nbd, port 10809) so the RPi4 boots fully diskless with the
-#            whole disk as a block device (RAUC A/B updates included)
+#   nbd/   — reflink/sparse copy of the raw disk image, exported over NBD
+#            (port 10809) so the RPi4 boots fully diskless with the whole
+#            disk as a block device (RAUC A/B updates included). The
+#            hassos-data partition is grown to fill the image (default 8G,
+#            --no-grow to skip) — haos-expand resizes the ext4 at boot.
 #   http/  — hassos-system0.erofs (debug/reference only)
 #
 # No root needed: partitions are located with `sfdisk -d` and the vfat boot
@@ -26,7 +28,18 @@
 
 set -eu
 
-IMG="${1:?usage: $0 <hevea_rpi4.img[.xz]>}"
+GROW_DATA=true
+GROW_SIZE="8G"
+IMG=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --no-grow)   GROW_DATA=false; shift ;;
+        --grow-data) GROW_DATA=true; GROW_SIZE="${2:?--grow-data needs a size, e.g. 8G}"; shift 2 ;;
+        -h|--help)   sed -n '2,25p' "$0"; exit 0 ;;
+        *)           IMG="$1"; shift ;;
+    esac
+done
+IMG="${IMG:?usage: $0 [--no-grow|--grow-data SIZE] <hevea_rpi4.img[.xz]>}"
 case "$IMG" in
     *.xz) [ -f "${IMG%.xz}" ] || unxz -k "$IMG"; IMG="${IMG%.xz}" ;;
 esac
@@ -91,10 +104,14 @@ if [ -n "$SYS0_START" ]; then
     dd if="$IMG" of="$HTTP_DIR/hassos-system0.erofs" bs=512 skip="$SYS0_START" count="$SYS0_SIZE" status=none
 fi
 
-echo "==> Reflink copy of the disk image for the NBD export -> $NBD_DIR"
+echo "==> Reflink/sparse copy of the disk image for the NBD export -> $NBD_DIR"
 mkdir -p "$NBD_DIR"
-cp --reflink=auto "$IMG" "$NBD_DIR/hevea_rpi4.img"
+cp --reflink=auto --sparse=always "$IMG" "$NBD_DIR/hevea_rpi4.img"
 chmod a+r "$NBD_DIR/hevea_rpi4.img"
+if [ "$GROW_DATA" = true ]; then
+    echo "==> Growing hassos-data partition of the NBD copy to fill ${GROW_SIZE}"
+    "$SCRIPT_DIR/grow-data-partition.sh" "$NBD_DIR/hevea_rpi4.img" "$GROW_SIZE"
+fi
 
 echo "==> Done. Boot files in $TFTP_DIR, image copy in $NBD_DIR, erofs in $HTTP_DIR"
 echo "    Build the initramfs: ./make-initramfs.sh ../../../output_rpi4_64"

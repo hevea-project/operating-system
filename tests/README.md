@@ -10,7 +10,7 @@ Deux cibles :
 | Cible | Stratégie | Comment |
 |-------|-----------|---------|
 | QEMU x86_64 (émulation) | `hevea-strategy.yaml` | image `output_ova/images/hevea_ova-*.qcow2` + `usb.img` (clé SSH) |
-| Raspberry Pi 4 physique, **diskless (PXE + NBD)** | `hevea-rpi-pxe-strategy.yaml` | serveur PXE sur le PC hôte + prise Matter HA pour l'alim |
+| Raspberry Pi 4 physique, **diskless (PXE + NBD)** | `hevea-rpi-pxe-strategy.yaml` | serveur PXE/NBD sur une machine **filaire dédiée** (`groszordi`, SSH) + prise Matter HA pour l'alim ; le PC de test peut être en WiFi |
 
 ## Setup
 
@@ -38,56 +38,73 @@ La stratégie QEMU démarre elle-même la VM (QMP), avec redirection des ports
 
 ## Raspberry Pi 4 physique — boot PXE diskless (100 % automatisé)
 
-Le RPi4 démarre **sans carte SD** : le PC hôte fait serveur DHCP + TFTP + NBD
+Le RPi4 démarre **sans carte SD** : une machine **filaire dédiée** (ici
+`groszordi`, 192.168.1.61, accessible en SSH) fait serveur DHCP + TFTP + NBD
 (dossier `hevea_test/pxe-server/`, voir son README pour le détail) et exporte
 **le disque entier** de l'image RPi4 en NBD. L'initramfs custom se connecte
 en NBD (netlink `NBD_CMD_CONNECT`), expose chaque partition GPT en loop device
 (read-write) et monte la racine erofs : les mises à jour RAUC A/B fonctionnent.
 
-Prérequis hôte :
+Seuls les broadcasts DHCP/TFTP doivent être sur le même segment L2 filaire :
+le serveur PXE tourne donc sur `groszordi` (Ethernet), et le PC de test
+(`lezordi`) peut rester en **WiFi** — le trafic unicast (app, VPN, SSH, NBD)
+est routé par le routeur.
 
-1. PC sur le **même segment L2 filaire** que le RPi4 (routeur entre les deux,
-   PC en Ethernet via dongle USB — le WiFi ne convient pas, les broadcasts
-   DHCP ne passent pas). IP fixe du PC obtenue par **réservation DHCP** du
-   routeur (même MAC du dongle), idem pour le RPi4 (MAC `dc:a6:32:14:63:44`
-   → IP fixe, ex. `192.168.1.150`).
-2. firewalld : autoriser DHCP (67/udp), TFTP (69/udp) et NBD (10809/tcp) sur
-   l'interface filaire, et `rp_filter=0` dessus.
-3. Le serveur PXE tourne (voir `hevea_test/pxe-server/README.md`) :
-   ```bash
-   cd hevea_test/pxe-server
-   ./extract-boot-files.sh ../../../output_rpi4_64/images/hevea_rpi4-64-18.4.1.img
-   ./make-initramfs.sh ../../../output_rpi4_64 <IP_PC>
-   docker compose down && docker compose up -d
-   ```
-4. Une prise connectée dans Home Assistant pour alimenter le RPi4
+### Déployer une image sur le RPi4 (une commande)
+
+```bash
+cd tests
+export LG_HA_URL=http://raspberrypi4 LG_RPI_SWITCH=switch.eve_energy LG_RPI_IP=192.168.1.150
+export PXE_SSH_HOST=groszordi
+./deploy-rpi4-image.sh                 # dernière image de output_rpi4_64/images/
+./deploy-rpi4-image.sh --flash-sd ...   # en plus, dd l'image sur une SD depuis le RPi
+./deploy-rpi4-image.sh --no-boot ...    # juste resynchroniser/démarrer le serveur PXE
+```
+
+Le script : power-off du RPi (prise HA) → `extract-boot-files.sh` (tftp/ +
+copie NBD growée à 8G via `grow-data-partition.sh`) → `make-initramfs.sh`
+(avec l'IP de groszordi) → `rsync --sparse -z` vers `groszordi` →
+`docker compose up -d --force-recreate` en SSH → power-on → attente SSH
+(22222) → affiche `/etc/os-release` + `rauc status`. `--flash-sd` sert
+ensuite l`.img` sur le HTTP :8880 du serveur PXE et le `dd` sur `/dev/mmcblk0`
+depuis le RPi4 lui-même.
+
+Prérequis :
+
+1. `groszordi` : filaire, IP fixe (réservation DHCP routeur), docker + compose,
+   rsync, mtools ; ports 67/udp, 69/udp, 10809/tcp ouverts (ufw/firewalld
+   inactifs). Le RPi4 a une réservation DHCP (MAC `dc:a6:32:14:63:44` →
+   192.168.1.150, aussi dans `dnsmasq.conf`).
+2. Une prise connectée dans Home Assistant pour alimenter le RPi4
    (ex. `switch.eve_energy`), plus un long-lived access token HA
    (fichier local `hevea_test/token`, **non commité**).
+3. Build rpi4_64 terminé sur le PC de test (`output_rpi4_64/`).
 
-Lancement (adapter les IP à votre réseau — **ne pas copier-coller aveuglément**,
-l'IP filaire du PC change si le dongle/DHCP change) :
+### Lancer les tests
 
 ```bash
 cd tests
 source venv/bin/activate
-# IP filaire actuelle du PC (interface enp6s0*, dongle USB) :
-PC_IP=$(ip -4 -o addr show | awk '/enp6s0/ {print $4}' | cut -d/ -f1 | head -1)
+# IP du PC de test vue par le RPi4 (WiFi OK, ex. 192.168.1.104) :
+PC_IP=$(ip -4 -o addr show | awk '/wlp|enp/ && !/docker/ {print $4}' | cut -d/ -f1 | head -1)
 export LG_RPI_IP=192.168.1.150            # IP fixe du RPi (réservation DHCP MAC)
 export LG_HA_URL=http://raspberrypi4     # HA sur le réseau du RPi
 export LG_HA_TOKEN=$(cat hevea_test/token)
 export LG_RPI_SWITCH=switch.eve_energy    # prise Matter de l'alim du RPi
 # Commissionnement e2e : la stack docker-compose du repo hevea (dossier docker/)
-# doit tourner sur le PC hôte, et le RPi doit pouvoir l'atteindre :
+# doit tourner sur le PC de test, et le RPi doit pouvoir l'atteindre :
 export HEVEA_APP_URL=http://$PC_IP:7030         # app, vue du PC
 export HEVEA_GATEWAY_VM_URL=http://$LG_RPI_IP:9000 # portail gateway du RPi
 export HEVEA_VM_APP_ADDR=http://$PC_IP:7030    # app_addr injecté dans l'addon
 pytest --lg-env hevea-rpi-pxe-strategy.yaml hevea_test/ -v --timeout=900
 ```
 
-> **Piège classique** : si l'IP filaire du PC a changé depuis le démarrage du
-> conteneur `dnsmasq`, le `cmdline.txt` servi au RPi contient l'ancienne IP du
-> serveur NBD et le boot échoue (SSH jamais up). Dans ce cas :
-> `cd hevea_test/pxe-server && docker compose restart dnsmasq`
+> **Piège classique** : si l'IP du serveur PXE a changé depuis le démarrage
+> du conteneur `dnsmasq`, le `cmdline.txt` servi au RPi contient l'ancienne IP
+> du serveur NBD et le boot échoue (SSH jamais up). Le script de déploiement
+> recrée toujours les conteneurs (`--force-recreate`), donc ce piège n'existe
+> plus en passant par `deploy-rpi4-image.sh` ; en manuel :
+> `ssh groszordi 'cd .../pxe-server && docker compose restart dnsmasq'`
 > (l'entrypoint régénère `tftp/cmdline.txt` avec l'IP détectée courante).
 
 La stratégie : power off via la prise HA → power on → boot PXE → attente SSH
