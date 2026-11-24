@@ -128,8 +128,12 @@ EOF
 # mounts the erofs system partition from it. The NBD server address is
 # templated (@NBD_SERVER@/@NBD_PORT@) and filled in by entrypoint.sh with
 # the detected IP of the PC's wired interface.
+# Mirror u-boot's bootargs_haos from boot.scr: without zram.num_devices=3 the
+# built-in zram only creates zram0, so /dev/zram1 (var) and /dev/zram2 (tmp)
+# never appear, zram-var/zram-tmp fail and /tmp + /var stay on the read-only
+# erofs root (docker then fails with "mkdir /tmp/...: read-only file system").
 cat > "$TFTP_DIR/cmdline.txt.in" <<'EOF'
-ip=dhcp nbd=@NBD_SERVER@:@NBD_PORT@ root=/dev/nbd0p3 rootfstype=erofs ro rootwait console=tty1 console=ttyAMA0,115200
+ip=dhcp nbd=@NBD_SERVER@:@NBD_PORT@ root=/dev/nbd0p3 rootfstype=erofs ro rootwait zram.enabled=1 zram.num_devices=3 cgroup_enable=memory fsck.repair=yes console=tty1 console=ttyAMA0,115200
 EOF
 cp "$TFTP_DIR/cmdline.txt.in" "$TFTP_DIR/cmdline.txt"
 chmod -R a+rX "$TFTP_DIR"
