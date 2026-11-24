@@ -124,6 +124,16 @@ serveur VPN) et du login HA via `hevea-auth.py`. Le test reset l'onboarding HA
 (stop → nettoyage de `.storage` → start) pour pouvoir recommissionner une
 image déjà utilisée.
 
+`test_commission_offline.py` : même flux de commissionnement, mais avec toute
+la sortie Internet publique bloquée sur la cible (iptables : seules les plages
+privées 10/8, 172.16/12, 192.168/16, 169.254/16 et lo passent, route par défaut
+supprimée). Le commissionnement (portail → app → zip de config → add-on
+OpenVPN → tunnel 10.8.x.x → login HA) ne doit utiliser que des adresses privées
+— dans notre lab, l'app et le serveur VPN sont sur le LAN du PC hôte. Le bloc
+est levé dans un `finally` même en cas d'échec. Note : le pull des images
+d'add-ons au premier boot (ghcr.io) exige lui Internet ; le test bloque donc
+après le bootstrap. Helpers partagés : `hevea_test/commission_common.py`.
+
 ## Fichiers
 
 | Fichier | Rôle |

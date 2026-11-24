@@ -67,6 +67,13 @@ def pytest_runtest_setup(item):
     logging_plugin.set_log_path(os.path.join(log_dir, f"{log_name}.log"))
 
 
+@pytest.fixture(scope="module")
+def app_token_and_site():
+    """Login to the app on the host and return (token, site_id)."""
+    from hevea_test import commission_common
+    return commission_common.app_login()
+
+
 @pytest.fixture
 def shell(target, strategy):
     """Fixture for accessing shell (ShellDriver on QEMU, SSHDriver on RPi)."""
