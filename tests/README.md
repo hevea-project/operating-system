@@ -124,15 +124,25 @@ serveur VPN) et du login HA via `hevea-auth.py`. Le test reset l'onboarding HA
 (stop → nettoyage de `.storage` → start) pour pouvoir recommissionner une
 image déjà utilisée.
 
-`test_commission_offline.py` : même flux de commissionnement, mais avec toute
-la sortie Internet publique bloquée sur la cible (iptables : seules les plages
-privées 10/8, 172.16/12, 192.168/16, 169.254/16 et lo passent, route par défaut
-supprimée). Le commissionnement (portail → app → zip de config → add-on
-OpenVPN → tunnel 10.8.x.x → login HA) ne doit utiliser que des adresses privées
-— dans notre lab, l'app et le serveur VPN sont sur le LAN du PC hôte. Le bloc
-est levé dans un `finally` même en cas d'échec. Note : le pull des images
-d'add-ons au premier boot (ghcr.io) exige lui Internet ; le test bloque donc
-après le bootstrap. Helpers partagés : `hevea_test/commission_common.py`.
+`test_commission_offline.py` : deux scénarios sans Internet publique sur la
+cible (iptables : seules les plages privées 10/8, 172.16/12, 192.168/16,
+169.254/16 et lo passent, route par défaut supprimée ; bloc levé dans un
+`finally`) :
+
+- `test_offline_first_boot_wifi_provisioning` (RPi4 uniquement, a besoin de
+  `HEVEA_WIFI_SSID` / `HEVEA_WIFI_PASSWORD`) : bloque Internet dès le shell up,
+  vérifie que le portail gateway répond offline (images des add-ons embarquées
+  dans l'image, pas de pull ghcr.io), provisionne le WiFi via le portail
+  (`POST /api/v1/networks` + `PUT /api/v1/networks/{id}` `state:true`), attend
+  que `wlan0` ait une IP et la route par défaut, vérifie qu'Internet revient via
+  le WiFi (egress public autorisé uniquement sur wlan0), puis fait le
+  commissionnement complet.
+- `test_commission_without_internet` : bloque TOUTE la sortie publique, puis
+  commissionne quand même — dans notre lab, l'app et le serveur VPN sont sur le
+  LAN du PC hôte, donc le commissionnement (portail → app → zip → OpenVPN →
+  tunnel 10.8.x.x → login HA) ne doit utiliser que des adresses privées.
+
+Helpers partagés : `hevea_test/commission_common.py`.
 
 ## Fichiers
 
