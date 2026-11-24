@@ -205,16 +205,16 @@ for board in "${BOARD_ARRAY[@]}"; do
     fi
 
     # Find the .raucb file matching the target version
-    RAUCB_PATH="${HAOS_ROOT}/output_${board}/images/haos_${BOARD_ID}-${FULL_VERSION}.raucb"
+    RAUCB_PATH="${HAOS_ROOT}/output_${board}/images/hevea_${BOARD_ID}-${FULL_VERSION}.raucb"
 
     if [ ! -f "$RAUCB_PATH" ]; then
         # If exact version not found, check if we're in skip-build mode and
         # fall back to any existing .raucb for this board (with a warning)
         if [ "$SKIP_BUILD" = true ]; then
-            RAUCB_PATH=$(find "${HAOS_ROOT}/output_${board}/images" -name "haos_${BOARD_ID}-*.raucb" 2>/dev/null | head -1)
+            RAUCB_PATH=$(find "${HAOS_ROOT}/output_${board}/images" -name "hevea_${BOARD_ID}-*.raucb" 2>/dev/null | head -1)
             if [ -n "$RAUCB_PATH" ] && [ -f "$RAUCB_PATH" ]; then
                 log_warn "Using existing image (version mismatch): $(basename "$RAUCB_PATH")"
-                log_warn "Expected version ${FULL_VERSION}, found $(basename "$RAUCB_PATH" | sed "s/haos_${BOARD_ID}-//;s/\.raucb//")"
+                log_warn "Expected version ${FULL_VERSION}, found $(basename "$RAUCB_PATH" | sed "s/hevea_${BOARD_ID}-//;s/\.raucb//")"
             fi
         fi
     fi
@@ -223,7 +223,7 @@ for board in "${BOARD_ARRAY[@]}"; do
         RAUCB_FILES["$BOARD_ID"]="$RAUCB_PATH"
         log_ok "Found: ${BOARD_ID} -> $(basename "$RAUCB_PATH") ($(du -h "$RAUCB_PATH" | cut -f1))"
     else
-        log_error "Not found: haos_${BOARD_ID}-${FULL_VERSION}.raucb in output_${board}/images/"
+        log_error "Not found: hevea_${BOARD_ID}-${FULL_VERSION}.raucb in output_${board}/images/"
         log_error "Run without --skip-build to build the images first."
     fi
 done
@@ -263,20 +263,24 @@ if [ "$SKIP_PUBLISH" = false ]; then
 
     # Structure on server (matching the OTA URL pattern):
     #   ${SERVER_PATH}/${CHANNEL}.json                    ← version manifest
-    #   ${SERVER_PATH}/${FULL_VERSION}/haos_<board>-<ver>.raucb  ← OTA bundles
+    #   ${SERVER_PATH}/${FULL_VERSION}/hevea_<board>-<ver>.raucb  ← OTA bundles
     #   ${SERVER_PATH}/apparmor_${CHANNEL}.txt            ← AppArmor profile
     #   ${SERVER_PATH}/online.txt                         ← connectivity check
     REMOTE_VERSION_DIR="${SERVER_PATH}/${FULL_VERSION}"
 
     log_info "Creating directories on ${SERVER_HOST}..."
-    run_cmd "ssh '${SERVER_HOST}' 'sudo mkdir -p ${REMOTE_VERSION_DIR} && sudo chown -R \$(whoami) ${SERVER_PATH}'"
+    if [ "$DRY_RUN" = false ]; then
+        run_cmd "ssh '${SERVER_HOST}' 'mkdir -p ${REMOTE_VERSION_DIR}'"
+    else
+        echo -e "${YELLOW}[DRY-RUN]${NC} mkdir -p ${REMOTE_VERSION_DIR}'"
+    fi
 
     # Copy .raucb files (renamed to match the target version)
     log_info "Uploading .raucb files to ${FULL_VERSION}/..."
     for board_id in "${!RAUCB_FILES[@]}"; do
         raucb="${RAUCB_FILES[$board_id]}"
-        # Target filename: haos_<board_id>-<FULL_VERSION>.raucb
-        target_name="haos_${board_id}-${FULL_VERSION}.raucb"
+        # Target filename: hevea_<board_id>-<FULL_VERSION>.raucb
+        target_name="hevea_${board_id}-${FULL_VERSION}.raucb"
         local_name=$(basename "$raucb")
 
         if [ "$local_name" != "$target_name" ]; then
@@ -332,7 +336,7 @@ echo "Update server structure:"
 echo "  ${SERVER_PATH}/${CHANNEL}.json                    ← version manifest"
 echo "  ${SERVER_PATH}/${FULL_VERSION}/                   ← OTA bundles"
 for board_id in "${!RAUCB_FILES[@]}"; do
-    echo "    haos_${board_id}-${FULL_VERSION}.raucb"
+    echo "    hevea_${board_id}-${FULL_VERSION}.raucb"
 done
 echo "  ${SERVER_PATH}/apparmor_${CHANNEL}.txt            ← AppArmor profile"
 echo "  ${SERVER_PATH}/online.txt                         ← connectivity check"
