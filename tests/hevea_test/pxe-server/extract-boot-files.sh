@@ -19,10 +19,14 @@
 # partition is copied out with dd. If mtools is missing and we are root,
 # falls back to losetup+mount.
 #
-# The stock HAOS config.txt boots u-boot and cmdline.txt points at the SD
+# The stock HAOS config.txt boots u-boot (which loads the kernel "Image" from
+# the hassos-kernel0/1 squashfs partitions) and cmdline.txt points at the SD
 # card. For the diskless PXE boot this script:
+#   - installs the RAW kernel as tftp/Image (from the build tree, or extracted
+#     from the hassos-kernel0 squashfs partition with 7z)
 #   - appends "kernel=Image" + "initramfs initrd.gz followkernel" to
-#     tftp/config.txt (original kept as config.txt.haos)
+#     tftp/config.txt (original kept as config.txt.haos) so the ROM loads the
+#     kernel directly over TFTP, bypassing u-boot
 #   - writes a diskless tftp/cmdline.txt (ip=dhcp, root on /dev/nbd0p*)
 # Run ./make-initramfs.sh <output_rpi4_64 dir> afterwards to build initrd.gz.
 
@@ -59,11 +63,14 @@ part_size()  { sfdisk -d "$IMG" | awk -v n="\"$1\"" '$0 ~ n { for (i=1;i<=NF;i++
 BOOT_START=$(part_start hassos-boot);  BOOT_SIZE=$(part_size hassos-boot)
 SYS0_START=$(part_start hassos-system0); SYS0_SIZE=$(part_size hassos-system0)
 [ -n "$BOOT_START" ] || { echo "hassos-boot partition not found in $IMG"; exit 1; }
-echo "==> hassos-boot: start=$BOOT_START size=$BOOT_START.. (sectors of 512B)"
+echo "==> hassos-boot: start=$BOOT_START size=$BOOT_SIZE.. (sectors of 512B)"
 [ -n "$SYS0_START" ] && echo "    hassos-system0: start=$SYS0_START size=$SYS0_SIZE"
 
 echo "==> Extracting boot partition to $TFTP_DIR"
+# Wipe the previous content first: stale files (e.g. an old kernel Image)
+# would otherwise mask files missing from the new image.
 mkdir -p "$TFTP_DIR"
+find "$TFTP_DIR" -mindepth 1 -delete
 dd if="$IMG" of="$WORK/boot.part" bs=512 skip="$BOOT_START" count="$BOOT_SIZE" status=none
 if command -v mcopy >/dev/null 2>&1; then
     mcopy -s -o -i "$WORK/boot.part" ::/ "$TFTP_DIR/"
@@ -76,6 +83,35 @@ elif [ "$(id -u)" = "0" ]; then
 else
     echo "need mtools (dnf install mtools) or run as root"; exit 1
 fi
+
+echo "==> Kernel Image -> $TFTP_DIR/Image"
+# The boot partition does NOT contain the kernel: u-boot's boot.scr loads it
+# as file "Image" from the hassos-kernel0/1 squashfs partitions. With the
+# diskless override (kernel=Image in config.txt) the ROM loads tftp/Image
+# directly, so we must provide the RAW kernel there.
+IMG_DIR=$(CDPATH= cd -- "$(dirname "$IMG")" && pwd)
+LINUX_IMAGE="$IMG_DIR/../build/linux-custom/arch/arm64/boot/Image"
+if [ -f "$LINUX_IMAGE" ]; then
+    # build tree present (image from output_<board>/images/): raw kernel
+    cp --sparse=always "$LINUX_IMAGE" "$TFTP_DIR/Image"
+elif command -v 7z >/dev/null 2>&1; then
+    # standalone image: pull Image out of the hassos-kernel0 squashfs (fallback: kernel1)
+    for part in hassos-kernel0 hassos-kernel1; do
+        K_START=$(part_start "$part"); K_SIZE=$(part_size "$part")
+        [ -n "$K_START" ] || continue
+        dd if="$IMG" of="$WORK/kernel.squash" bs=512 skip="$K_START" count="$K_SIZE" status=none
+        if 7z x -so "$WORK/kernel.squash" Image > "$TFTP_DIR/Image" 2>/dev/null && [ -s "$TFTP_DIR/Image" ]; then
+            echo "    extracted from $part (squashfs)"
+            break
+        fi
+    done
+fi
+if [ ! -s "$TFTP_DIR/Image" ]; then
+    echo "ERROR: could not obtain the raw kernel Image (no build tree next to the image and no 7z)" >&2
+    exit 1
+fi
+head -c 2 "$TFTP_DIR/Image" | grep -q "MZ" || echo "WARNING: tftp/Image does not start with the MZ kernel magic"
+ls -la "$TFTP_DIR/Image"
 
 echo "==> Diskless PXE overrides in $TFTP_DIR"
 # Keep the original config.txt, then force direct kernel boot (no u-boot,
