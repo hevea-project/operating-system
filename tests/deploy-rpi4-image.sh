@@ -90,8 +90,9 @@ ha_switch() {
 
 # ssh to the pxe-server host: BatchMode + no local forwards (a stale forward
 # in ~/.ssh/config otherwise spams "Address already in use" on every call)
+SSH_OPTS="-o BatchMode=yes -o ClearAllForwardings=yes"
 rssh() {
-    ssh -o BatchMode=yes -o ClearAllForwardings=yes "$PXE_SSH_HOST" "$@"
+    ssh $SSH_OPTS "$PXE_SSH_HOST" "$@"
 }
 
 # --- resolve where the pxe-server runs and its LAN IP (SRV_IP) -----------
@@ -143,15 +144,15 @@ fi
 if [ -n "$PXE_SSH_HOST" ]; then
     echo "==> rsync pxe-server to $PXE_SSH_HOST:$PXE_REMOTE_DIR"
     rssh "mkdir -p '$PXE_REMOTE_DIR/nbd' '$PXE_REMOTE_DIR/http'"
-    rsync -a --delete \
+    rsync -a --delete -e "ssh $SSH_OPTS" \
         --exclude '__pycache__/' --exclude 'token' --exclude 'nbd/' --exclude 'http/' \
         --exclude '*.img' --exclude '*.img.xz' \
         "$PXE_DIR/" "$PXE_SSH_HOST:$PXE_REMOTE_DIR/"
     # the NBD image separately: sparse + compressed, only real blocks cross
     # the LAN (the image is mostly empty space)
-    rsync -a --sparse -z "$PXE_DIR/nbd/hevea_rpi4.img" "$PXE_SSH_HOST:$PXE_REMOTE_DIR/nbd/hevea_rpi4.img"
+    rsync -a --sparse -z -e "ssh $SSH_OPTS" "$PXE_DIR/nbd/hevea_rpi4.img" "$PXE_SSH_HOST:$PXE_REMOTE_DIR/nbd/hevea_rpi4.img"
     if [ "$FLASH_SD" = true ]; then
-        rsync -a --sparse -z "$PXE_DIR/http/$(basename "$IMG")" "$PXE_SSH_HOST:$PXE_REMOTE_DIR/http/$(basename "$IMG")"
+        rsync -a --sparse -z -e "ssh $SSH_OPTS" "$PXE_DIR/http/$(basename "$IMG")" "$PXE_SSH_HOST:$PXE_REMOTE_DIR/http/$(basename "$IMG")"
     fi
     echo "==> docker compose up -d --force-recreate on $PXE_SSH_HOST"
     rssh "cd '$PXE_REMOTE_DIR' && PXE_IFACE='$PXE_REMOTE_IFACE' docker compose up -d --force-recreate"
