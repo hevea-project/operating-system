@@ -27,7 +27,13 @@ setup_vconsole
     echo "ID=${HAOS_ID}"
     echo "VERSION_ID=$(haos_version)"
     echo "PRETTY_NAME=\"${HAOS_NAME} $(haos_version)\""
-    echo "CPE_NAME=cpe:2.3:o:home-assistant:${HAOS_ID}:$(haos_version):*:${DEPLOYMENT}:*:*:*:${BOARD_ID}:*"
+    # The CPE product MUST stay "haos": the Supervisor detects HAOS from it
+    # (os/manager.py only accepts "hassos"/"haos"); any other product makes it
+    # report hassos=None, so HA Core classifies the install as generic
+    # "Supervised" and raises the unsupported-installation warning (since
+    # HA 2025.12). HAOS_ID only drives the display name/ID, file names and
+    # the RAUC compatible string, not the CPE product.
+    echo "CPE_NAME=cpe:2.3:o:home-assistant:haos:$(haos_version):*:${DEPLOYMENT}:*:*:*:${BOARD_ID}:*"
     echo "HOME_URL=https://www.home-assistant.io/"
     echo "VARIANT=\"${HAOS_NAME} ${BOARD_NAME}\""
     echo "VARIANT_ID=${BOARD_ID}"
