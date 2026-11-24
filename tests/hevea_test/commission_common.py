@@ -46,47 +46,55 @@ def wait_for(predicate, timeout=300, interval=5, description="condition"):
 
 
 def app_login():
-    """Login to the app on the host and return (token, site_id).
+    """Login to the app and return (token, site_id).
 
     Creates the test site if the stack is fresh (no site yet).
+
+    Tries APP_URL first, then falls back to http://localhost:7030 (the docker
+    stack runs on the pytest host, so localhost always works there — APP_URL
+    may point at a stale interface IP, e.g. an unplugged USB dongle).
     """
+    candidates = [APP_URL]
+    if APP_URL != "http://localhost:7030":
+        candidates.append("http://localhost:7030")
     deadline = time.time() + 120
     last_err = None
     while time.time() < deadline:
-        try:
-            r = requests.post(
-                f"{APP_URL}/api/v1/users/login",
-                json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
-                timeout=10,
-            )
-            if r.status_code == 200:
-                token = r.json()["token"]
-                r2 = requests.get(
-                    f"{APP_URL}/api/v1/sites",
-                    headers={"Authorization": f"Bearer {token}"},
+        for base in candidates:
+            try:
+                r = requests.post(
+                    f"{base}/api/v1/users/login",
+                    json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
                     timeout=10,
                 )
-                if r2.status_code == 200 and r2.json():
-                    return token, r2.json()[0]["id"]
-                if r2.status_code == 200:
-                    r3 = requests.post(
-                        f"{APP_URL}/api/v1/sites",
+                if r.status_code == 200:
+                    token = r.json()["token"]
+                    r2 = requests.get(
+                        f"{base}/api/v1/sites",
                         headers={"Authorization": f"Bearer {token}"},
-                        json={"name": "hevea-labgrid-test"},
                         timeout=10,
                     )
-                    if r3.status_code in (200, 201) and r3.json().get("id"):
-                        _LOGGER.info("Created test site %s", r3.json()["id"])
-                        return token, r3.json()["id"]
-                    last_err = f"site create: {r3.status_code} {r3.text}"
+                    if r2.status_code == 200 and r2.json():
+                        return token, r2.json()[0]["id"]
+                    if r2.status_code == 200:
+                        r3 = requests.post(
+                            f"{base}/api/v1/sites",
+                            headers={"Authorization": f"Bearer {token}"},
+                            json={"name": "hevea-labgrid-test"},
+                            timeout=10,
+                        )
+                        if r3.status_code in (200, 201) and r3.json().get("id"):
+                            _LOGGER.info("Created test site %s", r3.json()["id"])
+                            return token, r3.json()["id"]
+                        last_err = f"site create: {r3.status_code} {r3.text}"
+                    else:
+                        last_err = f"sites: {r2.status_code} {r2.text}"
                 else:
-                    last_err = f"sites: {r2.status_code} {r2.text}"
-            else:
-                last_err = f"login: {r.status_code} {r.text}"
-        except requests.RequestException as e:
-            last_err = str(e)
+                    last_err = f"login: {r.status_code} {r.text}"
+            except requests.RequestException as e:
+                last_err = str(e)
         time.sleep(3)
-    pytest.fail(f"App not reachable at {APP_URL}: {last_err}")
+    pytest.fail(f"App not reachable at {candidates}: {last_err}")
 
 
 def wait_system_ready(shell, timeout=600):
