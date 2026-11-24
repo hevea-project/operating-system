@@ -149,7 +149,10 @@ if [ -n "$PXE_SSH_HOST" ]; then
         --exclude '*.img' --exclude '*.img.xz' \
         "$PXE_DIR/" "$PXE_SSH_HOST:$PXE_REMOTE_DIR/"
     # the NBD image separately: sparse + compressed, only real blocks cross
-    # the LAN (the image is mostly empty space)
+    # the LAN (the image is mostly empty space). Remove the remote copy first:
+    # rsync writes a temp file + rename, so it needs free space for the new
+    # image ON TOP of the old one — the PXE host disk may be nearly full.
+    rssh "rm -f '$PXE_REMOTE_DIR/nbd/hevea_rpi4.img' '$PXE_REMOTE_DIR/nbd/.hevea_rpi4.img.'* 2>/dev/null || true"
     rsync -a --sparse -z -e "ssh $SSH_OPTS" "$PXE_DIR/nbd/hevea_rpi4.img" "$PXE_SSH_HOST:$PXE_REMOTE_DIR/nbd/hevea_rpi4.img"
     if [ "$FLASH_SD" = true ]; then
         rsync -a --sparse -z -e "ssh $SSH_OPTS" "$PXE_DIR/http/$(basename "$IMG")" "$PXE_SSH_HOST:$PXE_REMOTE_DIR/http/$(basename "$IMG")"

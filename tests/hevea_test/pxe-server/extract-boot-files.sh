@@ -33,12 +33,12 @@
 set -eu
 
 GROW_DATA=true
-GROW_SIZE="8G"
+GROW_SIZE="16G"
 IMG=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --no-grow)   GROW_DATA=false; shift ;;
-        --grow-data) GROW_DATA=true; GROW_SIZE="${2:?--grow-data needs a size, e.g. 8G}"; shift 2 ;;
+        --grow-data) GROW_DATA=true; GROW_SIZE="${2:?--grow-data needs a size, e.g. 16G}"; shift 2 ;;
         -h|--help)   sed -n '2,25p' "$0"; exit 0 ;;
         *)           IMG="$1"; shift ;;
     esac
