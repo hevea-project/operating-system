@@ -143,29 +143,33 @@ def _wlan_iface(shell):
 
 
 def _assert_access_point_down(shell, shell_json):
-    """After finalization the gateway stopped the access point add-on: the
-    add-on is not running, no hostapd process, and every wlan interface other
-    than the client one is administratively/operationally down (the AP
-    interface wlan1 is deleted or DOWN)."""
-    apps = shell_json("ha apps --raw-json")
-    ap = next((a for a in apps.get("data", {}).get("addons", [])
-               if "access-point" in a.get("slug", "")), None)
-    state = ap.get("state") if ap else "absent"
-    _LOGGER.info("Access point add-on state: %s", state)
-    assert state not in ("started", "starting"), f"AP add-on still running: {state}"
+    """After finalization the gateway stops the access point add-on (async,
+    right after /api/v1/commission answers): wait until the add-on is not
+    running, no hostapd process, and every wlan interface other than the
+    client one is down (the AP interface wlan1 is deleted or DOWN)."""
+    def ap_down():
+        apps = shell_json("ha apps --raw-json")
+        ap = next((a for a in apps.get("data", {}).get("addons", [])
+                   if "access-point" in a.get("slug", "")), None)
+        state = ap.get("state") if ap else "absent"
+        if state in ("started", "starting"):
+            return False
+        hostapd = _shell_text(shell, "pgrep -a hostapd 2>/dev/null || echo none").strip()
+        if hostapd != "none":
+            return False
+        client = _wlan_iface(shell)
+        out = _shell_text(shell, "ip -o link show | awk -F': ' '{print $2}'")
+        for name in out.split():
+            if not name.startswith("wlan") or name == client:
+                continue
+            oper = _shell_text(shell, f"ip link show {name} 2>/dev/null | grep -o 'state [A-Z]*' | head -1").strip()
+            if oper == "state UP":
+                return False
+        _LOGGER.info("Access point down: add-on state=%s, no hostapd, AP iface down", state)
+        return True
 
-    hostapd = _shell_text(shell, "pgrep -a hostapd 2>/dev/null || echo none").strip()
-    assert hostapd == "none", f"hostapd still running: {hostapd}"
-
-    client = _wlan_iface(shell)
-    out = _shell_text(shell, "ip -o link show | awk -F': ' '{print $2}'")
-    for name in out.split():
-        if not name.startswith("wlan") or name == client:
-            continue
-        oper = _shell_text(shell, f"ip link show {name} 2>/dev/null | grep -o 'state [A-Z]*' | head -1").strip()
-        _LOGGER.info("AP interface %s: %s", name, oper or "absent")
-        assert oper != "state UP", f"AP interface {name} still UP"
-    _LOGGER.info("Access point is down (add-on %s, no hostapd, AP iface down)", state)
+    cc.wait_for(ap_down, timeout=180, interval=5,
+                description="access point down after finalization")
 
 
 def _assert_wlan_connected(shell, wlan, ssid):
@@ -173,13 +177,18 @@ def _assert_wlan_connected(shell, wlan, ssid):
     connection is the lab SSID, has an IPv4, and the default route uses it."""
     st = _shell_text(shell, f"nmcli -t -f GENERAL.STATE device show {wlan} 2>/dev/null").strip()
     assert "100 (connected)" in st, f"{wlan} not connected: {st}"
-    con = _shell_text(shell, f"nmcli -t -f GENERAL.CONNECTION device show {wlan} 2>/dev/null").strip()
-    assert ssid in con, f"{wlan} active connection {con!r} does not match SSID {ssid!r}"
+    # The active profile is not named after the SSID (HAOS pre-creates
+    # "Supervisor <iface>"), so read the profile's 802-11-wireless.ssid.
+    con = _shell_text(shell, f"nmcli -t -f GENERAL.CONNECTION device show {wlan} 2>/dev/null | cut -d: -f2-").strip()
+    con_ssid = _shell_text(shell, f'nmcli -t -f 802-11-wireless.ssid con show "{con}" 2>/dev/null | cut -d: -f2-').strip()
+    assert con_ssid == ssid, f"{wlan} active connection {con!r} has SSID {con_ssid!r}, expected {ssid!r}"
     ip = _shell_text(shell, f"ip -4 addr show {wlan} 2>/dev/null | grep inet").strip()
     assert ip, f"{wlan} has no IPv4 address"
-    gw, iface = _default_route(shell)
-    assert iface == wlan, f"default route via {iface!r} (gw {gw!r}), expected {wlan!r}"
-    _LOGGER.info("wlan0 connected to %s (%s), default route via %s", ssid, ip, wlan)
+    # A default route via the wifi must exist (the ethernet one may coexist;
+    # _force_default_via removes it earlier in the test for egress checks).
+    route = _shell_text(shell, f"ip route show default | grep 'dev {wlan}'").strip()
+    assert route, f"no default route via {wlan}: {_shell_text(shell, 'ip route show default')}"
+    _LOGGER.info("%s connected to %s (%s), default route via %s: %s", wlan, ssid, ip, wlan, route)
 
 
 @pytest.mark.timeout(900)
@@ -211,20 +220,36 @@ def test_offline_first_boot_wifi_provisioning(shell, shell_json, app_token_and_s
             return gw and gw.get("state") in ("started", "starting")
         cc.wait_for(gw_started, timeout=300, description="gateway add-on started offline")
 
-        # The portal answers while offline (reached over the LAN from the host)
-        r = requests.get(f"{cc.GATEWAY_VM_URL}/", timeout=15)
-        assert r.status_code == 200, f"portal not reachable offline: {r.status_code}"
-        _LOGGER.info("Gateway portal answers while offline (status %s)", r.status_code)
+        # The portal answers while offline (reached over the LAN from the host).
+        # The add-on state flips to "started" before the HTTP listener is bound,
+        # so retry the GET instead of asserting once.
+        def portal_ok():
+            try:
+                return requests.get(f"{cc.GATEWAY_VM_URL}/", timeout=15).status_code == 200
+            except requests.RequestException:
+                return False
+        cc.wait_for(portal_ok, timeout=120, interval=5,
+                    description="portal answers while offline")
+        _LOGGER.info("Gateway portal answers while offline")
 
         # The /networks page renders the WiFi scan (GET /networks): the lab
         # SSID must be listed so the user can select it.
-        r = requests.get(f"{cc.GATEWAY_VM_URL}/networks", timeout=30)
-        assert r.status_code == 200, f"GET /networks: {r.status_code} {r.text[:200]}"
-        scanned = r.json()
-        assert isinstance(scanned, list), f"GET /networks not a list: {str(scanned)[:200]}"
-        scanned_ssids = [n.get("ssid", "") for n in scanned]
+        def scan_ok():
+            try:
+                r = requests.get(f"{cc.GATEWAY_VM_URL}/networks", timeout=30)
+            except requests.RequestException:
+                return None
+            if r.status_code != 200:
+                return None
+            scanned = r.json()
+            if not isinstance(scanned, list):
+                return None
+            return [n.get("ssid", "") for n in scanned]
+        scanned_ssids = cc.wait_for(
+            lambda: (lambda s: s if s and ssid in s else None)(scan_ok()),
+            timeout=180, interval=10,
+            description=f"portal scan lists SSID {ssid!r}")
         _LOGGER.info("Portal scans WiFi networks: %s", scanned_ssids)
-        assert ssid in scanned_ssids, f"SSID {ssid!r} not in portal scan {scanned_ssids}"
 
         # User selects the network and enters its credentials in the portal
         r = requests.post(f"{cc.GATEWAY_VM_URL}/api/v1/networks",
