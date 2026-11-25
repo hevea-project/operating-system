@@ -263,9 +263,15 @@ configure_otbr() {
     echo "⚠️ Could not read the Supervisor token, skipping OTBR configuration" >&2
     return 0
   fi
+  # backbone_interface: the uplink interface (default route device, e.g.
+  # end0) — without it otbr-agent refuses to start ("No primary network
+  # interface found").
+  local bb
+  bb=$(ip route show default 2>/dev/null | awk '{print $5}' | head -1)
+  [ -n "$bb" ] || bb="end0"
   opts=$(docker exec hassio_supervisor sh -c \
     "curl -s -H \"Authorization: Bearer $tok\" http://localhost/addons/$OTBR_SLUG/info" 2>/dev/null \
-    | jq --arg dev "$device" '.data.options + {device: $dev}')
+    | jq --arg dev "$device" --arg bb "$bb" '{options: (.data.options + {device: $dev, backbone_interface: $bb})}')
   if [ -z "$opts" ] || [ "$opts" = "null" ]; then
     echo "⚠️ Could not read $OTBR_SLUG options, skipping" >&2
     return 0
