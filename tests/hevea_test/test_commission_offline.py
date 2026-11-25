@@ -142,6 +142,46 @@ def _wlan_iface(shell):
     return None
 
 
+def _assert_access_point_down(shell, shell_json):
+    """After finalization the gateway stopped the access point add-on: the
+    add-on is not running, no hostapd process, and every wlan interface other
+    than the client one is administratively/operationally down (the AP
+    interface wlan1 is deleted or DOWN)."""
+    apps = shell_json("ha apps --raw-json")
+    ap = next((a for a in apps.get("data", {}).get("addons", [])
+               if "access-point" in a.get("slug", "")), None)
+    state = ap.get("state") if ap else "absent"
+    _LOGGER.info("Access point add-on state: %s", state)
+    assert state not in ("started", "starting"), f"AP add-on still running: {state}"
+
+    hostapd = _shell_text(shell, "pgrep -a hostapd 2>/dev/null || echo none").strip()
+    assert hostapd == "none", f"hostapd still running: {hostapd}"
+
+    client = _wlan_iface(shell)
+    out = _shell_text(shell, "ip -o link show | awk -F': ' '{print $2}'")
+    for name in out.split():
+        if not name.startswith("wlan") or name == client:
+            continue
+        oper = _shell_text(shell, f"ip link show {name} 2>/dev/null | grep -o 'state [A-Z]*' | head -1").strip()
+        _LOGGER.info("AP interface %s: %s", name, oper or "absent")
+        assert oper != "state UP", f"AP interface {name} still UP"
+    _LOGGER.info("Access point is down (add-on %s, no hostapd, AP iface down)", state)
+
+
+def _assert_wlan_connected(shell, wlan, ssid):
+    """wlan0 is connected to the lab WiFi: NM state connected, active
+    connection is the lab SSID, has an IPv4, and the default route uses it."""
+    st = _shell_text(shell, f"nmcli -t -f GENERAL.STATE device show {wlan} 2>/dev/null").strip()
+    assert "100 (connected)" in st, f"{wlan} not connected: {st}"
+    con = _shell_text(shell, f"nmcli -t -f GENERAL.CONNECTION device show {wlan} 2>/dev/null").strip()
+    assert ssid in con, f"{wlan} active connection {con!r} does not match SSID {ssid!r}"
+    ip = _shell_text(shell, f"ip -4 addr show {wlan} 2>/dev/null | grep inet").strip()
+    assert ip, f"{wlan} has no IPv4 address"
+    gw, iface = _default_route(shell)
+    assert iface == wlan, f"default route via {iface!r} (gw {gw!r}), expected {wlan!r}"
+    _LOGGER.info("wlan0 connected to %s (%s), default route via %s", ssid, ip, wlan)
+
+
 @pytest.mark.timeout(900)
 def test_offline_first_boot_wifi_provisioning(shell, shell_json, app_token_and_site):
     """Offline first boot -> WiFi provisioning via the portal -> online ->
@@ -176,7 +216,17 @@ def test_offline_first_boot_wifi_provisioning(shell, shell_json, app_token_and_s
         assert r.status_code == 200, f"portal not reachable offline: {r.status_code}"
         _LOGGER.info("Gateway portal answers while offline (status %s)", r.status_code)
 
-        # User enters the WiFi credentials in the portal
+        # The /networks page renders the WiFi scan (GET /networks): the lab
+        # SSID must be listed so the user can select it.
+        r = requests.get(f"{cc.GATEWAY_VM_URL}/networks", timeout=30)
+        assert r.status_code == 200, f"GET /networks: {r.status_code} {r.text[:200]}"
+        scanned = r.json()
+        assert isinstance(scanned, list), f"GET /networks not a list: {str(scanned)[:200]}"
+        scanned_ssids = [n.get("ssid", "") for n in scanned]
+        _LOGGER.info("Portal scans WiFi networks: %s", scanned_ssids)
+        assert ssid in scanned_ssids, f"SSID {ssid!r} not in portal scan {scanned_ssids}"
+
+        # User selects the network and enters its credentials in the portal
         r = requests.post(f"{cc.GATEWAY_VM_URL}/api/v1/networks",
                           json={"ssid": ssid, "password": password}, timeout=30)
         assert r.status_code == 201, f"POST /api/v1/networks: {r.status_code} {r.text[:200]}"
@@ -214,6 +264,11 @@ def test_offline_first_boot_wifi_provisioning(shell, shell_json, app_token_and_s
         cc.wait_for(lambda: cc.ha_login_flow_ok(shell), timeout=180,
                     description="HA login with Hevea credentials")
         cc.assert_ha_settings_clean()
+
+        # End state of the provisioning: the access point is down and wlan0
+        # is connected to the lab WiFi (credentials from the portal).
+        _assert_access_point_down(shell, shell_json)
+        _assert_wlan_connected(shell, wlan, ssid)
         _LOGGER.info("Offline-boot -> WiFi provisioning -> commissioning: OK")
     finally:
         _restore_internet(shell)
