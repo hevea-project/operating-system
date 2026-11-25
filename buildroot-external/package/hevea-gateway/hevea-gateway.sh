@@ -227,17 +227,26 @@ start_gateway || FAILED=1
 OTBR_SLUG="core_openthread_border_router"
 MATTER_SLUG="core_matter_server"
 
-# Stable device path of the Thread USB dongle (e.g. ESP32-C6 running the
-# OpenThread RCP firmware, which enumerates as an Espressif USB serial
-# gadget): prefer the by-id symlink, then any ttyACM/ttyUSB.
+# Stable device path of the Thread USB dongle (a USB serial running the
+# OpenThread RCP firmware: ESP32-C6 enumerates as an Espressif gadget, the
+# nRF52840 as "usb-Nordic_Semiconductor_nRF528xx_OpenThread_Device", Silicon
+# Labs as SL_OpenThread...). Prefer the /dev/serial/by-id symlink, then the
+# first ttyACM/ttyUSB. The dongle may not be enumerated yet when the
+# bootstrap runs early at boot, so wait a few seconds for it to appear.
 detect_thread_dongle() {
-  local d
-  for d in /dev/serial/by-id/*Espressif* /dev/serial/by-id/*ESP32* \
-           /dev/serial/by-id/*usb-serial* /dev/serial/by-id/*USB_Serial*; do
-    [ -e "$d" ] && { echo "$d"; return 0; }
-  done
-  for d in /dev/ttyACM0 /dev/ttyUSB0; do
-    [ -e "$d" ] && { echo "$d"; return 0; }
+  local d i
+  for i in $(seq 1 15); do
+    for d in /dev/serial/by-id/*Espressif* /dev/serial/by-id/*ESP32* \
+             /dev/serial/by-id/*Nordic* /dev/serial/by-id/*nRF* \
+             /dev/serial/by-id/*OpenThread* /dev/serial/by-id/*SL_OpenThread* /dev/serial/by-id/*SL_Openthread* \
+             /dev/serial/by-id/*Silicon_Labs* /dev/serial/by-id/*Texas_Instruments* \
+             /dev/serial/by-id/*usb-serial* /dev/serial/by-id/*USB_Serial*; do
+      [ -e "$d" ] && { echo "$d"; return 0; }
+    done
+    for d in /dev/ttyACM* /dev/ttyUSB*; do
+      [ -e "$d" ] && { echo "$d"; return 0; }
+    done
+    sleep 1
   done
   return 1
 }
@@ -282,6 +291,14 @@ configure_otbr() {
       | jq -e '.result == "ok"' >/dev/null 2>&1; then
     echo "⚠️ Could not set $OTBR_SLUG options" >&2
     return 0
+  fi
+  # Verify the device option was applied (read it back)
+  local applied
+  applied=$(docker exec hassio_supervisor sh -c \
+    "curl -s -H \"Authorization: Bearer $tok\" http://localhost/addons/$OTBR_SLUG/info" 2>/dev/null \
+    | jq -r '.data.options.device // empty')
+  if [ "$applied" != "$device" ]; then
+    echo "⚠️ $OTBR_SLUG device option not applied (got '${applied:-none}', expected '$device')" >&2
   fi
   # Options only apply on (re)start
   if is_addon_running "$OTBR_SLUG"; then

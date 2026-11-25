@@ -39,14 +39,28 @@ def _running(shell_json, slug):
 
 
 def _dongle_device(shell):
-    """The Thread dongle device path on the target, or None (QEMU has none)."""
+    """The Thread dongle device path on the target, or None (QEMU has none).
+
+    Mirrors detect_thread_dongle() in hevea-gateway.sh: prefer the
+    /dev/serial/by-id symlink of a known OpenThread RCP vendor (Espressif,
+    Nordic nRF, Silicon Labs, ...), then the first ttyACM/ttyUSB.
+    """
     out = _shell_text(
         shell,
-        "ls /dev/serial/by-id/ 2>/dev/null; ls /dev/ttyACM0 /dev/ttyUSB0 2>/dev/null",
+        "ls /dev/serial/by-id/ 2>/dev/null; ls -d /dev/ttyACM* /dev/ttyUSB* 2>/dev/null",
     )
+    by_id = [f"/dev/serial/by-id/{line.strip()}"
+             for line in out.splitlines()
+             if line.strip().startswith("usb-")]
+    for pat in ("espressif", "esp32", "nordic", "nrf", "openthread",
+                "sl_openthread", "silicon_labs", "texas_instruments",
+                "usb-serial", "usb_serial"):
+        for d in by_id:
+            if pat in d.lower():
+                return d
     for line in out.splitlines():
         line = line.strip()
-        if line.startswith("/dev/"):
+        if line.startswith("/dev/tty"):
             return line
     return None
 
@@ -85,12 +99,18 @@ def test_otbr_configured_and_thread_up(shell, shell_json):
     ap = _addon(shell_json, OTBR)
     assert ap is not None, f"{OTBR} not installed (image missing the pre-install state?)"
 
-    # Configured with the dongle device by hevea-gateway.sh at first boot
+    # Configured with the dongle device by hevea-gateway.sh at first boot.
+    # The bootstrap may use the by-id symlink or the tty node: compare the
+    # resolved device nodes, not the paths.
     info = shell_json(f"ha apps info {OTBR} --raw-json")
     opts = info.get("data", {}).get("options", {})
     _LOGGER.info("OTBR options: %s", opts)
-    assert opts.get("device") == dongle, \
-        f"OTBR device {opts.get('device')!r} != dongle {dongle!r}"
+    dev = opts.get("device")
+    assert dev, f"OTBR device option not set (dongle: {dongle})"
+    dev_real = _shell_text(shell, f"readlink -f {dev} 2>/dev/null").strip()
+    dongle_real = _shell_text(shell, f"readlink -f {dongle} 2>/dev/null").strip()
+    assert dev_real and dev_real == dongle_real, \
+        f"OTBR device {dev!r} ({dev_real!r}) != dongle {dongle!r} ({dongle_real!r})"
     assert opts.get("backbone_interface"), "OTBR backbone_interface not set"
 
     # The add-on is running
