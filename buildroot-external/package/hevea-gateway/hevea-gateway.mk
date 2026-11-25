@@ -13,6 +13,14 @@ HEVEA_ADDONS = gateway hassio-access-point hassio-openvpn
 HEVEA_ADDON_TAG = 1.0.0
 HEVEA_REPO_URL = https://github.com/hevea-project/hassio-apps
 
+# Official add-ons pre-installed under the built-in "core" repository slug
+# (core-repo/<slug>/config.yaml), slug:version pairs. Their images live under
+# ghcr.io/home-assistant/app-<slug with dashes>:<version>.
+HEVEA_CORE_ADDONS = openthread_border_router:3.4.0 matter_server:9.3.0
+# Image reference for a slug:version pair (note: no space after the comma in
+# subst — the space would become part of the replacement)
+hevea-core-image = ghcr.io/home-assistant/app-$(subst _,-,$(word 1,$(subst :, ,$(1)))):$(word 2,$(subst :, ,$(1)))
+
 # Map buildroot arch to OCI platform arch for skopeo
 ifeq ($(BR2_aarch64),y)
 HEVEA_ADDON_OCI_ARCH = arm64
@@ -34,13 +42,21 @@ define HEVEA_GATEWAY_BUILD_CMDS
 			docker://ghcr.io/hevea-project/$(addon):$(HEVEA_ADDON_TAG) \
 			oci-archive:$(@D)/images/$(addon).tar:ghcr.io/hevea-project/$(addon):$(HEVEA_ADDON_TAG); \
 	)
+	$(foreach addon,$(HEVEA_CORE_ADDONS),\
+		echo "Downloading official add-on image: $(call hevea-core-image,$(addon)) ($(HEVEA_ADDON_OCI_ARCH))"; \
+		skopeo copy --override-arch $(HEVEA_ADDON_OCI_ARCH) \
+			docker://$(call hevea-core-image,$(addon)) \
+			oci-archive:$(@D)/images/$(word 1,$(subst :, ,$(addon))).tar:$(call hevea-core-image,$(addon)); \
+	)
 	# Pre-install state for the data partition: the Supervisor cannot install
 	# add-ons while the host is offline (its install job always pulls the
 	# image from the registry), so the add-ons are baked as already installed
-	# under the GitHub repository slug (the same add-ons as the repository
-	# provides, updatable once it is added).
+	# under their repository slug: the Hevea add-ons under the GitHub
+	# repository slug (the same add-ons as the repository provides, updatable
+	# once it is added), the official add-ons under the built-in "core" slug.
 	$(Q)python3 $(HEVEA_GATEWAY_PKGDIR)/craft-apps-json.py \
-		$(HEVEA_GATEWAY_PKGDIR)/addons-repo $(@D)/apps.json "$(HEVEA_REPO_URL)"
+		$(HEVEA_GATEWAY_PKGDIR)/addons-repo $(HEVEA_GATEWAY_PKGDIR)/core-repo \
+		$(@D)/apps.json "$(HEVEA_REPO_URL)"
 endef
 
 define HEVEA_GATEWAY_INSTALL_TARGET_CMDS

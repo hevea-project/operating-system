@@ -17,36 +17,67 @@ repository slug means the pre-installed add-ons are the same as the ones
 the GitHub repository provides: once the repository is added (first online
 boot), they are known to the store and can be updated.
 
-Usage: craft-apps-json.py <addons-repo-dir> <output-apps.json> <repo-url>
+Usage: craft-apps-json.py <addons-repo-dir> <core-repo-dir> <output-apps.json> <repo-url>
+
+The Hevea add-ons (addons-repo-dir) are baked under the GitHub repository
+slug derived from repo-url. The add-ons from the official repository
+(core-repo-dir, one subdirectory per add-on slug) are baked under the
+built-in "core" repository slug ("core"), which the Supervisor always has
+pre-configured, so e.g. openthread_border_router becomes
+"core_openthread_border_router" and can be updated once the official
+repository is synced.
 """
 import hashlib
 import json
 import sys
+from pathlib import Path
 
 import yaml
 
 ADDONS = ["hassio-gateway", "hassio-access-point", "hassio-openvpn"]
 
+# Built-in repository slug of the official add-ons (supervisor store
+# built-in.json), not derived from a URL.
+CORE_REPO_SLUG = "core"
+
+
+def entry_from_config(cfg: dict, repo_slug: str) -> tuple[str, dict, dict]:
+    key = f"{repo_slug}_{cfg['slug']}"
+    user = {
+        "version": cfg["version"],
+        "image": cfg["image"],
+        "options": cfg.get("options") or {},
+    }
+    system = dict(cfg)
+    system["repository"] = repo_slug
+    return key, user, system
+
 
 def main() -> int:
-    if len(sys.argv) != 4:
+    if len(sys.argv) != 5:
         print(__doc__, file=sys.stderr)
         return 2
-    src, out_path, repo_url = sys.argv[1], sys.argv[2], sys.argv[3]
+    src, core_src, out_path, repo_url = sys.argv[1:5]
     repo_slug = hashlib.sha1(repo_url.lower().encode()).hexdigest()[:8]
 
     out = {"user": {}, "system": {}}
     for slug in ADDONS:
         with open(f"{src}/{slug}/config.yaml") as f:
             cfg = yaml.safe_load(f)
-        key = f"{repo_slug}_{slug}"
-        out["user"][key] = {
-            "version": cfg["version"],
-            "image": cfg["image"],
-            "options": cfg.get("options") or {},
-        }
-        system = dict(cfg)
-        system["repository"] = repo_slug
+        key, user, system = entry_from_config(cfg, repo_slug)
+        out["user"][key] = user
+        out["system"][key] = system
+
+    # Official add-ons (OpenThread Border Router, Matter Server, ...):
+    # one subdirectory per add-on slug in core_src.
+    for addon_dir in sorted(Path(core_src).iterdir()):
+        cfg_file = addon_dir / "config.yaml"
+        if not cfg_file.is_file():
+            continue
+        with open(cfg_file) as f:
+            cfg = yaml.safe_load(f)
+        key, user, system = entry_from_config(cfg, CORE_REPO_SLUG)
+        out["user"][key] = user
         out["system"][key] = system
 
     with open(out_path, "w") as f:
