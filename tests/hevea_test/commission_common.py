@@ -370,3 +370,101 @@ def ha_login_flow_ok(shell):
         return result.get("type") == "create_entry"
     except (json.JSONDecodeError, KeyError):
         return False
+
+
+# Home Assistant web UI of the target, as seen from the host running pytest.
+# QEMU: localhost (hostfwd port 80); RPi4: http://<rpi-ip> (gateway portal is at
+# <rpi-ip>:9000, HA itself on port 80).
+HA_VM_URL = os.environ.get(
+    "HEVEA_HA_VM_URL",
+    "http://" + (urllib.parse.urlparse(GATEWAY_VM_URL).hostname or "localhost"),
+)
+
+
+def ha_command_line_token(base_url=None, email=None, password=None):
+    """Full HA login via the command_line auth provider, from the host.
+
+    Drives the same HTTP flow as the web UI login form (no browser needed):
+    POST /auth/login_flow with handler ["command_line", null], submit the
+    credentials, exchange the auth code at /auth/token.
+
+    Returns an access token.
+    """
+    base_url = base_url or HA_VM_URL
+    email = email or ADMIN_EMAIL
+    password = password or ADMIN_PASSWORD
+    client_id = f"{base_url}/"
+    s = requests.Session()
+    r = s.post(
+        f"{base_url}/auth/login_flow",
+        json={"client_id": client_id, "handler": ["command_line", None],
+              "redirect_uri": client_id},
+        timeout=15,
+    )
+    r.raise_for_status()
+    flow_id = r.json()["flow_id"]
+    r = s.post(
+        f"{base_url}/auth/login_flow/{flow_id}",
+        json={"client_id": client_id, "username": email, "password": password},
+        timeout=15,
+    )
+    r.raise_for_status()
+    result = r.json()
+    assert result.get("type") == "create_entry", f"command_line login failed: {result}"
+    r = s.post(
+        f"{base_url}/auth/token",
+        data={"grant_type": "authorization_code", "code": result["result"],
+              "client_id": client_id},
+        timeout=15,
+    )
+    r.raise_for_status()
+    return r.json()["access_token"]
+
+
+def ha_list_issues(token, base_url=None):
+    """List HA repair issues (the Settings -> Repairs section) via websocket.
+
+    HA 2026.9 has no REST endpoint for issues anymore; the frontend uses the
+    `repairs/list_issues` websocket command on /api/websocket.
+    """
+    import websocket  # websocket-client
+
+    base_url = base_url or HA_VM_URL
+    ws_url = base_url.replace("http://", "ws://", 1).replace("https://", "wss://", 1)
+    ws = websocket.create_connection(f"{ws_url}/api/websocket", timeout=20)
+    try:
+        ws.recv()  # {"type": "auth_required", ...}
+        ws.send(json.dumps({"type": "auth", "access_token": token}))
+        auth = json.loads(ws.recv())
+        assert auth.get("type") == "auth_ok", f"websocket auth failed: {auth}"
+        ws.send(json.dumps({"id": 1, "type": "repairs/list_issues"}))
+        while True:
+            msg = json.loads(ws.recv())
+            if msg.get("id") == 1:
+                return msg["result"]["issues"]
+    finally:
+        ws.close()
+
+
+def assert_ha_settings_clean():
+    """Login to HA with the Hevea credentials (command_line provider) and assert
+    the Settings -> Repairs section shows no error.
+
+    In particular no unsupported/deprecated-installation issue: that one
+    appears when the os-release CPE product is not "haos" and the Supervisor
+    does not detect HAOS (see post-build.sh).
+    """
+    token = ha_command_line_token()
+    issues = ha_list_issues(token)
+    summary = [(i.get("domain"), i.get("issue_id"), i.get("severity")) for i in issues]
+    _LOGGER.info("HA repairs issues: %s", summary)
+    errors = [i for i in issues if i.get("severity") in ("error", "critical")]
+    assert not errors, f"error-severity issues in HA Settings -> Repairs: {errors}"
+    regressions = [
+        i for i in issues
+        if any(k in str(i.get("issue_id", "")) + str(i.get("translation_key", ""))
+               for k in ("deprecated", "unsupported"))
+    ]
+    assert not regressions, (
+        f"unsupported/deprecated-installation issue present in HA Settings: {regressions}"
+    )

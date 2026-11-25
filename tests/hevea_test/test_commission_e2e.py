@@ -67,3 +67,22 @@ def test_ha_login_with_hevea_credentials(shell):
         pytest.skip(reason)
     cc.wait_for(lambda: cc.ha_login_flow_ok(shell), timeout=180,
                 description="HA login with Hevea credentials")
+
+
+@pytest.mark.timeout(300)
+def test_ha_settings_repairs_clean(shell):
+    """After commissioning, HA Settings -> Repairs shows no error.
+
+    Logs into HA from the host with the Hevea credentials through the
+    command_line auth provider (HTTP login flow, no browser) and lists the
+    repair issues over the websocket API (repairs/list_issues). Fails on any
+    error/critical issue, and on any unsupported/deprecated-installation
+    issue (the os-release CPE product must stay "haos" so the Supervisor
+    detects HAOS).
+    """
+    reason = cc.ha_auth_provider_missing_reason(shell)
+    if reason:
+        pytest.skip(reason)
+    cc.wait_for(lambda: cc.ha_login_flow_ok(shell), timeout=180,
+                description="HA login with Hevea credentials")
+    cc.assert_ha_settings_clean()

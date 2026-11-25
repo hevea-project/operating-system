@@ -213,6 +213,7 @@ def test_offline_first_boot_wifi_provisioning(shell, shell_json, app_token_and_s
             pytest.skip(reason)
         cc.wait_for(lambda: cc.ha_login_flow_ok(shell), timeout=180,
                     description="HA login with Hevea credentials")
+        cc.assert_ha_settings_clean()
         _LOGGER.info("Offline-boot -> WiFi provisioning -> commissioning: OK")
     finally:
         _restore_internet(shell)
@@ -255,6 +256,7 @@ def test_commission_without_internet(shell, shell_json, app_token_and_site):
             pytest.skip(reason)
         cc.wait_for(lambda: cc.ha_login_flow_ok(shell), timeout=180,
                     description="HA login with Hevea credentials (offline)")
+        cc.assert_ha_settings_clean()
         _LOGGER.info("Offline HA login OK: commissioning fully works without Internet")
     finally:
         _restore_internet(shell)
