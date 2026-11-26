@@ -278,17 +278,33 @@ configure_otbr() {
   local bb
   bb=$(ip route show default 2>/dev/null | awk '{print $5}' | head -1)
   [ -n "$bb" ] || bb="end0"
-  opts=$(docker exec hassio_supervisor sh -c \
-    "curl -s -H \"Authorization: Bearer $tok\" http://localhost/addons/$OTBR_SLUG/info" 2>/dev/null \
-    | jq --arg dev "$device" --arg bb "$bb" '{options: (.data.options + {device: $dev, backbone_interface: $bb})}')
+  # The Supervisor API can be busy right after boot (add-on restore jobs),
+  # so retry the read and the write a few times before giving up.
+  opts=""
+  i=0
+  while [ $i -lt 5 ]; do
+    opts=$(docker exec hassio_supervisor sh -c \
+      "curl -s -H \"Authorization: Bearer $tok\" http://localhost/addons/$OTBR_SLUG/info" 2>/dev/null \
+      | jq --arg dev "$device" --arg bb "$bb" '{options: (.data.options + {device: $dev, backbone_interface: $bb})}')
+    [ -n "$opts" ] && [ "$opts" != "null" ] && break
+    i=$((i + 1)); sleep 5
+  done
   if [ -z "$opts" ] || [ "$opts" = "null" ]; then
     echo "⚠️ Could not read $OTBR_SLUG options, skipping" >&2
     return 0
   fi
   echo "⚙️ Configuring $OTBR_SLUG with device=$device"
-  if ! docker exec hassio_supervisor sh -c \
-      "curl -s -X POST -H \"Authorization: Bearer $tok\" -H \"Content-Type: application/json\" -d '$opts' http://localhost/addons/$OTBR_SLUG/options" 2>/dev/null \
-      | jq -e '.result == "ok"' >/dev/null 2>&1; then
+  posted=false
+  i=0
+  while [ $i -lt 5 ]; do
+    if docker exec hassio_supervisor sh -c \
+        "curl -s -X POST -H \"Authorization: Bearer $tok\" -H \"Content-Type: application/json\" -d '$opts' http://localhost/addons/$OTBR_SLUG/options" 2>/dev/null \
+        | jq -e '.result == "ok"' >/dev/null 2>&1; then
+      posted=true; break
+    fi
+    i=$((i + 1)); sleep 5
+  done
+  if [ "$posted" != true ]; then
     echo "⚠️ Could not set $OTBR_SLUG options" >&2
     return 0
   fi

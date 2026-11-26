@@ -113,16 +113,36 @@ def test_otbr_configured_and_thread_up(shell, shell_json):
         f"OTBR device {dev!r} ({dev_real!r}) != dongle {dongle!r} ({dongle_real!r})"
     assert opts.get("backbone_interface"), "OTBR backbone_interface not set"
 
-    # The add-on is running
-    cc.wait_for(lambda: _running(shell_json, OTBR), timeout=180,
-                description="OTBR add-on started")
-
-    # The Thread network is functional: ot-ctl state is an attached role
-    def thread_up():
+    # The add-on is running: Supervisor state started AND the container is
+    # actually up and not crash-looping.
+    def otbr_running():
+        if not _running(shell_json, OTBR):
+            return False
         out = _shell_text(
-            shell, f"docker exec app_{OTBR} ot-ctl state 2>/dev/null | head -1"
+            shell,
+            f"docker inspect app_{OTBR} --format '{{{{.State.Status}}}} restarting={{{{.State.Restarting}}}}' 2>/dev/null",
         ).strip()
-        _LOGGER.info("ot-ctl state: %s", out)
-        return out in ("leader", "router", "child")
-    cc.wait_for(thread_up, timeout=180, interval=10,
-                description="Thread network up (ot-ctl state leader/router/child)")
+        _LOGGER.info("OTBR container: %s", out)
+        return out == "running restarting=false"
+    cc.wait_for(otbr_running, timeout=180, interval=10,
+                description="OTBR add-on started (container running, not restarting)")
+
+    # The Thread network is active: ot-ctl state is an attached role, an
+    # active dataset exists (network key + active timestamp) and the network
+    # has a name.
+    def thread_active():
+        def ot(*args):
+            return _shell_text(
+                shell, f"docker exec app_{OTBR} ot-ctl {' '.join(args)} 2>/dev/null"
+            ).strip()
+        state = ot("state").splitlines()[0] if ot("state") else ""
+        dataset = ot("dataset", "active")
+        name = ot("networkname")
+        _LOGGER.info("ot-ctl state=%s networkname=%r dataset-active=%s",
+                     state, name, "Network Key" in dataset)
+        return (state in ("leader", "router", "child")
+                and "Network Key" in dataset
+                and "Active Timestamp" in dataset
+                and bool(name))
+    cc.wait_for(thread_active, timeout=180, interval=10,
+                description="Thread network active (attached role + active dataset)")
