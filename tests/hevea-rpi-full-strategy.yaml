@@ -1,0 +1,43 @@
+# Full automation strategy for a physical Raspberry Pi 4B:
+# - flash the HAOS image via USB OTG (rpiboot, no SD manipulation)
+# - power on/off via a Home Assistant switch (Matter plug)
+# - SSH into the booted RPi and run tests
+#
+# Prerequisites on the host:
+#   sudo apt install usbboot   # or build from github.com/raspberrypi/usbboot
+#   RPi4 connected to host via USB-C (power + data), NO SD card inserted
+#
+# Environment variables (labgrid only substitutes LG_*-prefixed variables
+# via !template, so use those names):
+#   LG_RPI_IP       IP of the RPi once booted (DHCP, fixed via your router)
+#   LG_HA_URL       Home Assistant URL (e.g. http://homeassistant.local:8123)
+#   LG_HA_TOKEN     Home Assistant long-lived access token
+#   LG_RPI_SWITCH   HA switch entity for the RPi power (e.g. switch.eve_energy)
+
+imports:
+  - custom_timeout_ssh_driver.py
+  - hevea_rpi_power_driver.py
+  - hevea_rpi_flash_strategy.py
+
+targets:
+  main:
+    resources:
+      - NetworkService:
+          address: !template ${LG_RPI_IP}
+          username: root
+          port: 22222
+
+    drivers:
+      - HomeAssistantPowerDriver:
+          ha_url: !template ${LG_HA_URL}
+          ha_token: !template ${LG_HA_TOKEN}
+          entity: !template ${LG_RPI_SWITCH}
+      # HAOS exposes dropbear on port 22222 (not 22). SSHDriver is used
+      # directly as the shell: on a physical target there is no console,
+      # and ShellDriver requires a ConsoleProtocol.
+      - CustomTimeoutSSHDriver:
+          keyfile: ./hevea_test/test_ssh_key
+          connection_timeout: 60.0
+          command_timeout: 300
+      - RPiFlashStrategy:
+          image_path: ../output_rpi4_64/images/hevea_rpi4-64-18.4.1.img

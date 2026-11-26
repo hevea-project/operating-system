@@ -1,3 +1,4 @@
 labgrid==26.0.1
 pytest-dependency==0.6.1
 pytest-timeout==2.4.0
+websocket-client==1.9.2

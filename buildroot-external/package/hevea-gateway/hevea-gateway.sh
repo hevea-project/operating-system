@@ -223,6 +223,129 @@ fi
 # Start the Hevea Gateway addon
 start_gateway || FAILED=1
 
+# --- Official add-ons (pre-installed under the built-in "core" slug) -------
+OTBR_SLUG="core_openthread_border_router"
+MATTER_SLUG="core_matter_server"
+
+# Stable device path of the Thread USB dongle (a USB serial running the
+# OpenThread RCP firmware: ESP32-C6 enumerates as an Espressif gadget, the
+# nRF52840 as "usb-Nordic_Semiconductor_nRF528xx_OpenThread_Device", Silicon
+# Labs as SL_OpenThread...). Prefer the /dev/serial/by-id symlink, then the
+# first ttyACM/ttyUSB. The dongle may not be enumerated yet when the
+# bootstrap runs early at boot, so wait a few seconds for it to appear.
+detect_thread_dongle() {
+  local d i
+  for i in $(seq 1 15); do
+    for d in /dev/serial/by-id/*Espressif* /dev/serial/by-id/*ESP32* \
+             /dev/serial/by-id/*Nordic* /dev/serial/by-id/*nRF* \
+             /dev/serial/by-id/*OpenThread* /dev/serial/by-id/*SL_OpenThread* /dev/serial/by-id/*SL_Openthread* \
+             /dev/serial/by-id/*Silicon_Labs* /dev/serial/by-id/*Texas_Instruments* \
+             /dev/serial/by-id/*usb-serial* /dev/serial/by-id/*USB_Serial*; do
+      [ -e "$d" ] && { echo "$d"; return 0; }
+    done
+    for d in /dev/ttyACM* /dev/ttyUSB*; do
+      [ -e "$d" ] && { echo "$d"; return 0; }
+    done
+    sleep 1
+  done
+  return 1
+}
+
+# Configure the OpenThread Border Router add-on with the dongle device and
+# start it. The Supervisor API has no partial options update, so the full
+# options object is read, merged with the device, and pushed back. The token
+# is read from hassio_cli and the API is called inside hassio_supervisor.
+# Non-fatal: a missing dongle or a missing add-on must not fail the bootstrap.
+configure_otbr() {
+  if ! is_addon_installed "openthread_border_router"; then
+    echo "ℹ️ $OTBR_SLUG not installed, skipping OpenThread Border Router"
+    return 0
+  fi
+  local device tok opts
+  if ! device=$(detect_thread_dongle); then
+    echo "ℹ️ No Thread USB dongle detected, skipping OpenThread Border Router"
+    return 0
+  fi
+  echo "🔌 Thread dongle detected: $device"
+  tok=$(docker exec hassio_cli sh -c 'echo $SUPERVISOR_TOKEN' 2>/dev/null)
+  if [ -z "$tok" ]; then
+    echo "⚠️ Could not read the Supervisor token, skipping OTBR configuration" >&2
+    return 0
+  fi
+  # backbone_interface: the uplink interface (default route device, e.g.
+  # end0) — without it otbr-agent refuses to start ("No primary network
+  # interface found").
+  local bb
+  bb=$(ip route show default 2>/dev/null | awk '{print $5}' | head -1)
+  [ -n "$bb" ] || bb="end0"
+  # The Supervisor API can be busy right after boot (add-on restore jobs),
+  # so retry the read and the write a few times before giving up.
+  opts=""
+  i=0
+  while [ $i -lt 5 ]; do
+    opts=$(docker exec hassio_supervisor sh -c \
+      "curl -s -H \"Authorization: Bearer $tok\" http://localhost/addons/$OTBR_SLUG/info" 2>/dev/null \
+      | jq --arg dev "$device" --arg bb "$bb" '{options: (.data.options + {device: $dev, backbone_interface: $bb})}')
+    [ -n "$opts" ] && [ "$opts" != "null" ] && break
+    i=$((i + 1)); sleep 5
+  done
+  if [ -z "$opts" ] || [ "$opts" = "null" ]; then
+    echo "⚠️ Could not read $OTBR_SLUG options, skipping" >&2
+    return 0
+  fi
+  echo "⚙️ Configuring $OTBR_SLUG with device=$device"
+  posted=false
+  i=0
+  while [ $i -lt 5 ]; do
+    if docker exec hassio_supervisor sh -c \
+        "curl -s -X POST -H \"Authorization: Bearer $tok\" -H \"Content-Type: application/json\" -d '$opts' http://localhost/addons/$OTBR_SLUG/options" 2>/dev/null \
+        | jq -e '.result == "ok"' >/dev/null 2>&1; then
+      posted=true; break
+    fi
+    i=$((i + 1)); sleep 5
+  done
+  if [ "$posted" != true ]; then
+    echo "⚠️ Could not set $OTBR_SLUG options" >&2
+    return 0
+  fi
+  # Verify the device option was applied (read it back)
+  local applied
+  applied=$(docker exec hassio_supervisor sh -c \
+    "curl -s -H \"Authorization: Bearer $tok\" http://localhost/addons/$OTBR_SLUG/info" 2>/dev/null \
+    | jq -r '.data.options.device // empty')
+  if [ "$applied" != "$device" ]; then
+    echo "⚠️ $OTBR_SLUG device option not applied (got '${applied:-none}', expected '$device')" >&2
+  fi
+  # Options only apply on (re)start
+  if is_addon_running "$OTBR_SLUG"; then
+    ha apps restart "$OTBR_SLUG" >/dev/null 2>&1 || true
+  else
+    local i
+    for i in 1 2 3; do
+      ha apps start "$OTBR_SLUG" >/dev/null 2>&1 && break
+      sleep 5
+    done
+  fi
+  if is_addon_running "$OTBR_SLUG"; then
+    echo "✅ OpenThread Border Router running (device: $device)"
+  else
+    echo "⚠️ OpenThread Border Router configured but not running yet (device: $device)" >&2
+  fi
+  return 0
+}
+
+for core_addon in openthread_border_router matter_server; do
+  if is_addon_installed "$core_addon"; then
+    echo "✅ Official add-on $core_addon pre-installed"
+  else
+    echo "⚠️ Official add-on $core_addon not installed (offline repair impossible, it will install on the first online boot)"
+  fi
+done
+
+configure_otbr
+# The Matter server needs no first-boot configuration (network-only,
+# boot: auto): the Supervisor starts it by itself once installed.
+
 if [ "$FAILED" -ne 0 ]; then
   echo "❌ Hevea Gateway Bootstrap failed" >&2
   exit 1

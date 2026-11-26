@@ -1,0 +1,52 @@
+# Full automation strategy for a physical Raspberry Pi 4B via PXE boot:
+# - no SD card needed: the RPi4 boots the HAOS kernel/initramfs over the network
+# - power on/off via a Home Assistant switch (Matter plug)
+# - tests run over SSH once booted
+#
+# Prerequisites:
+#   1. A PXE+NBD server on a WIRED host on the RPi4's L2 segment (see
+#      hevea_test/pxe-server/README.md) — e.g. "groszordi" via SSH; deploy an
+#      image + start it with: PXE_SSH_HOST=groszordi ./deploy-rpi4-image.sh
+#      (the test PC itself may be on WiFi: only DHCP/TFTP broadcasts need the
+#      wired segment, unicast traffic is routed).
+#   2. RPi4 with EEPROM recent enough for network boot (>= 2020-09-03, check
+#      with `vcgencmd bootloader_version` once booted from an SD card) and
+#      BOOT_ORDER containing 0x2 (NETWORK). BOOT_ORDER is read right-to-left
+#      (LSB nibble first): 0x1=SD, 0x2=NETWORK, 0x4=USB-MSD, 0xf=RESTART.
+#      The factory default 0xf41 = SD then USB, WITHOUT network — set e.g.
+#      BOOT_ORDER=0xf21 (SD then NET) or 0xf12 (NET first) via
+#      `sudo rpi-eeprom-config --edit` (works headless over SSH).
+#
+# Environment variables (labgrid only substitutes LG_*-prefixed variables
+# via !template, so use those names):
+#   LG_RPI_IP       IP assigned to the RPi by DHCP (fixed via MAC reservation)
+#   LG_HA_URL       Home Assistant URL (e.g. http://homeassistant.local:8123)
+#   LG_HA_TOKEN     Home Assistant long-lived access token
+#   LG_RPI_SWITCH   HA switch entity for the RPi power (e.g. switch.eve_energy)
+
+imports:
+  - custom_timeout_ssh_driver.py
+  - hevea_rpi_power_driver.py
+  - hevea_rpi_pxe_strategy.py
+
+targets:
+  main:
+    resources:
+      - NetworkService:
+          address: !template ${LG_RPI_IP}
+          username: root
+          port: 22222
+
+    drivers:
+      - HomeAssistantPowerDriver:
+          ha_url: !template ${LG_HA_URL}
+          ha_token: !template ${LG_HA_TOKEN}
+          entity: !template ${LG_RPI_SWITCH}
+      # HAOS exposes dropbear on port 22222 (not 22). SSHDriver is used
+      # directly as the shell: on a physical target there is no console,
+      # and ShellDriver requires a ConsoleProtocol.
+      - CustomTimeoutSSHDriver:
+          keyfile: ./hevea_test/test_ssh_key
+          connection_timeout: 60.0
+          command_timeout: 300
+      - RPiPXEStrategy: {}
