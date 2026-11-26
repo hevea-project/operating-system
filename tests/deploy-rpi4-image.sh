@@ -19,6 +19,11 @@
 #                RPi4 itself (SD card inserted), then power off. The SD then
 #                holds the image and the RPi4 can boot from SD afterwards.
 #   --no-boot    stop after (re)starting the pxe-server, do not power-cycle
+#   --onboard    after the RPi4 is up, commission it through the gateway portal
+#                (runs onboard-rpi4.sh; see its env vars, e.g. HEVEA_WIFI_SSID)
+#   --no-deploy  do not deploy an image at all: no extraction, no pxe-server
+#                restart, no power cycle — just wait for the already-running
+#                RPi4 to answer SSH (combine with --onboard to only onboard)
 #   -h, --help   show this help
 #
 # Env (same variables as the labgrid RPi PXE strategy, hevea-rpi-pxe-strategy.yaml):
@@ -47,16 +52,23 @@ SSH_KEY="$SCRIPT_DIR/hevea_test/test_ssh_key"
 
 FLASH_SD=false
 DO_BOOT=true
+DEPLOY=true
+ONBOARD=false
 IMG=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --flash-sd) FLASH_SD=true; shift ;;
         --no-boot)  DO_BOOT=false; shift ;;
-        -h|--help)  sed -n '2,31p' "$0"; exit 0 ;;
+        --onboard)  ONBOARD=true; shift ;;
+        --no-deploy) DEPLOY=false; shift ;;
+        -h|--help)  sed -n '2,42p' "$0"; exit 0 ;;
         *)          IMG="$1"; shift ;;
     esac
 done
+
+[ "$FLASH_SD" = false ] || [ "$DEPLOY" = true ] || {
+    echo "--flash-sd requires a deploy (not --no-deploy)" >&2; exit 1; }
 
 LG_RPI_IP="${LG_RPI_IP:-192.168.1.150}"
 LG_HA_URL="${LG_HA_URL:?set LG_HA_URL (Home Assistant URL)}"
@@ -70,15 +82,19 @@ PXE_IFACE="${PXE_IFACE:-enp6s0*}"
 
 [ -n "$LG_HA_TOKEN" ] || { echo "LG_HA_TOKEN empty and hevea_test/token missing" >&2; exit 1; }
 
-if [ -z "$IMG" ]; then
-    IMG=$(ls -t "$OUTPUT_DIR"/images/hevea_rpi4-64-*.img "$OUTPUT_DIR"/images/hevea_rpi4-64-*.img.xz 2>/dev/null | head -1 || true)
+if [ "$DEPLOY" = true ]; then
+    if [ -z "$IMG" ]; then
+        IMG=$(ls -t "$OUTPUT_DIR"/images/hevea_rpi4-64-*.img "$OUTPUT_DIR"/images/hevea_rpi4-64-*.img.xz 2>/dev/null | head -1 || true)
+    fi
+    [ -n "$IMG" ] && [ -f "$IMG" ] || { echo "image not found: ${IMG:-none in $OUTPUT_DIR/images/hevea_rpi4-64-*}" >&2; exit 1; }
+    case "$IMG" in
+        *.xz) [ -f "${IMG%.xz}" ] || unxz -k "$IMG"; IMG="${IMG%.xz}" ;;
+    esac
+    IMG=$(CDPATH= cd -- "$(dirname "$IMG")" && pwd)/$(basename "$IMG")
+    echo "==> Image: $IMG ($(du -h "$IMG" | cut -f1) on disk, $(stat -c %s "$IMG") apparent)"
+else
+    echo "==> --no-deploy: no image deployed, using the RPi4 as-is at $LG_RPI_IP"
 fi
-[ -n "$IMG" ] && [ -f "$IMG" ] || { echo "image not found: ${IMG:-none in $OUTPUT_DIR/images/hevea_rpi4-64-*}" >&2; exit 1; }
-case "$IMG" in
-    *.xz) [ -f "${IMG%.xz}" ] || unxz -k "$IMG"; IMG="${IMG%.xz}" ;;
-esac
-IMG=$(CDPATH= cd -- "$(dirname "$IMG")" && pwd)/$(basename "$IMG")
-echo "==> Image: $IMG ($(du -h "$IMG" | cut -f1) on disk, $(stat -c %s "$IMG") apparent)"
 
 ha_switch() {
     curl -sf -X POST \
@@ -96,6 +112,8 @@ rssh() {
 }
 
 # --- resolve where the pxe-server runs and its LAN IP (SRV_IP) -----------
+# (skipped entirely in --no-deploy mode: the pxe-server is left untouched)
+if [ "$DEPLOY" = true ]; then
 if [ -n "$PXE_SSH_HOST" ]; then
     if [ -z "$PXE_REMOTE_IFACE" ]; then
         PXE_REMOTE_IFACE=$(rssh "ls /sys/class/net | grep -E '^en' | head -1")
@@ -168,10 +186,15 @@ if [ "$DO_BOOT" = false ]; then
     echo "==> --no-boot: pxe-server restarted on ${PXE_SSH_HOST:-localhost} ($SRV_IP), RPi4 not power-cycled. Done."
     exit 0
 fi
+fi # DEPLOY
 
 # --- 4. power on -> PXE boot -> wait for SSH -------------------------------
-echo "==> power on -> PXE boot"
-ha_switch turn_on
+if [ "$DEPLOY" = true ]; then
+    echo "==> power on -> PXE boot"
+    ha_switch turn_on
+else
+    echo "==> --no-deploy: waiting for the already-running RPi4 (power it on via $LG_RPI_SWITCH if needed)"
+fi
 
 echo "==> waiting for SSH root@$LG_RPI_IP:22222 (timeout 300s)"
 SSH="ssh -i $SSH_KEY -p 22222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o BatchMode=yes root@$LG_RPI_IP"
@@ -208,4 +231,14 @@ if [ "$FLASH_SD" = true ]; then
     ha_switch turn_off
 fi
 
-echo "==> Done. Deployed $(basename "$IMG") on the RPi4 at $LG_RPI_IP (pxe-server: ${PXE_SSH_HOST:-local} $SRV_IP)"
+if [ "$ONBOARD" = true ]; then
+    echo "==> onboarding the RPi4 through the gateway portal (onboard-rpi4.sh)"
+    "$SCRIPT_DIR/onboard-rpi4.sh"
+fi
+
+ONB_SUFFIX=""; [ "$ONBOARD" = true ] && ONB_SUFFIX=", onboarded"
+if [ "$DEPLOY" = true ]; then
+    echo "==> Done. Deployed $(basename "$IMG") on the RPi4 at $LG_RPI_IP (pxe-server: ${PXE_SSH_HOST:-local} $SRV_IP)$ONB_SUFFIX"
+else
+    echo "==> Done. RPi4 at $LG_RPI_IP was not redeployed$ONB_SUFFIX"
+fi
